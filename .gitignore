@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# 数据文件（包含用户隐私）
+data/
+*.json
+!package.json
+
+# 配置文件（包含 API Key 和 Cookie）
+config.py
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 打包文件
+dist/
+build/
+*.spec
+
+# 日志
+*.log
+
+# 操作系统
+.DS_Store
+Thumbs.db

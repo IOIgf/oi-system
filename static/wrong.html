@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>错题本 · OI 训练系统</title>
+    <style>
+        /* ========== 主题变量 ========== */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
+            padding: 24px 20px;
+            min-height: 100vh;
+            transition: background 0.2s, color 0.2s;
+        }
+        body.light {
+            --bg-primary: #f8fafc;
+            --bg-secondary: #ffffff;
+            --bg-glass: rgba(255,255,255,0.7);
+            --text-primary: #0f172a;
+            --text-secondary: #334155;
+            --border: #e2e8f0;
+            --card-shadow: 0 10px 25px -5px rgba(0,0,0,0.05);
+            --accent: #b8963a;
+            --accent-hover: #d4b86a;
+            --danger: #ef4444;
+            --success: #10b981;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        body.dark {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-glass: rgba(30,41,59,0.8);
+            --text-primary: #f1f5f9;
+            --text-secondary: #cbd5e1;
+            --border: #334155;
+            --card-shadow: 0 10px 25px -5px rgba(0,0,0,0.2);
+            --accent: #b8963a;
+            --accent-hover: #d4b86a;
+            --danger: #f87171;
+            --success: #34d399;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        .container { max-width: 1100px; margin: 0 auto; }
+
+        nav {
+            background: var(--bg-glass);
+            backdrop-filter: blur(12px);
+            border-radius: 8px;
+            padding: 0.8rem 1.8rem;
+            margin-bottom: 2rem;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--card-shadow);
+        }
+        nav .brand { font-weight: 600; font-size: 1.05rem; color: var(--text-primary); }
+        nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 0.3rem 0.8rem;
+            border-radius: 4px;
+            transition: 0.2s;
+            font-size: 0.95rem;
+        }
+        nav a:hover { background: var(--accent); color: #1a1a1a; }
+        nav .nav-links { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+
+        .theme-switch { display: flex; gap: 0.5rem; }
+        .theme-switch button {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            padding: 0.3rem 0.8rem;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: 0.2s;
+            font-size: 0.85rem;
+        }
+        .theme-switch button:hover { background: var(--accent); color: #fff; }
+
+        .card {
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            padding: 1.2rem 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid var(--border);
+            box-shadow: var(--card-shadow);
+        }
+        .card h2 {
+            font-weight: 600;
+            font-size: 1.2rem;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+        .card .subtitle {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-bottom: 12px;
+        }
+
+        .problem-item {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            margin: 3px 6px 3px 0;
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: 0.2s;
+        }
+        .problem-item:hover {
+            transform: translateY(-1px);
+            box-shadow: var(--card-shadow);
+        }
+        .problem-item .status-badge {
+            font-weight: 600;
+            margin-right: 4px;
+        }
+        .problem-item .status-badge.WA { color: var(--danger); }
+        .problem-item .status-badge.TLE { color: var(--warning, #f59e0b); }
+        .problem-item .status-badge.RE { color: var(--danger); }
+        .problem-item .status-badge.MLE { color: var(--warning, #f59e0b); }
+        .problem-item .status-badge.CE { color: var(--text-secondary); }
+        .problem-item .difficulty-tag {
+            font-size: 0.7rem;
+            padding: 1px 6px;
+            border-radius: 3px;
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+            margin-left: 4px;
+        }
+
+        .tag-group {
+            margin-top: 8px;
+        }
+        .tag-group summary {
+            cursor: pointer;
+            font-weight: 500;
+            color: var(--text-secondary);
+            padding: 6px 0;
+        }
+        .tag-group summary:hover { color: var(--text-primary); }
+        .tag-group .tag-count {
+            font-weight: 400;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-left: 8px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .empty-state .emoji { font-size: 3rem; margin-bottom: 12px; }
+
+        .loading {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+        .loading .spinner {
+            display: inline-block;
+            width: 32px;
+            height: 32px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            margin-bottom: 16px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .diff-color-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 4px;
+        }
+
+        @media (max-width: 768px) {
+            body { padding: 16px; }
+            nav { flex-direction: column; gap: 0.6rem; align-items: stretch; }
+            nav .nav-links { justify-content: center; flex-wrap: wrap; }
+            .theme-switch { justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <nav>
+        <span class="brand">📕 错题本</span>
+        <div class="nav-links">
+            <a href="/">📊 分析面板</a>
+            <a href="/static/chat.html">💬 AI 教练</a>
+            <a href="/static/contests.html">📅 比赛详情</a>
+            <div class="theme-switch">
+                <button onclick="setTheme('light')">☀️</button>
+                <button onclick="setTheme('dark')">🌙</button>
+            </div>
+        </div>
+    </nav>
+
+    <div id="content">
+        <div class="loading">
+            <div class="spinner"></div>
+            <div>加载数据中...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function setTheme(theme) {
+        document.body.className = theme;
+        localStorage.setItem('oi-theme', theme);
+    }
+    document.body.className = localStorage.getItem('oi-theme') || 'dark';
+
+    const diffColors = {
+        '入门': '#e74c3c', '普及-': '#f39c12', '普及': '#f1c40f',
+        '普及+/提高-': '#2ecc71', '提高': '#1abc9c',
+        '提高+/省选-': '#3498db', '省选/NOI-': '#9b59b6',
+        'NOI/NOI+/CTS': '#2c3e50', '暂无评定': '#95a5a6', '未知': '#95a5a6'
+    };
+
+    function render(data) {
+        const container = document.getElementById('content');
+        const wrong = data.wrong_problems || [];
+        const analysis = data.analysis || {};
+
+        if (!wrong.length) {
+            container.innerHTML = `
+                <div class="empty-state">
+                    <div class="emoji">🎉</div>
+                    <h2>暂无错题！</h2>
+                    <p style="color:var(--text-secondary);">继续保持，你已经 AC 了所有题目</p>
+                </div>
+            `;
+            return;
+        }
+
+        // 按标签分组
+        const tagGroups = {};
+        wrong.forEach(p => {
+            const tags = p.tags || ['无标签'];
+            tags.forEach(tag => {
+                if (!tagGroups[tag]) tagGroups[tag] = [];
+                tagGroups[tag].push(p);
+            });
+        });
+        if (wrong.length > 0 && Object.keys(tagGroups).length === 0) {
+            tagGroups['无标签'] = wrong;
+        }
+
+        // 按标签名排序
+        const sortedTags = Object.keys(tagGroups).sort();
+
+        let html = `
+            <div class="card">
+                <h2>📕 错题本</h2>
+                <div class="subtitle">
+                    共 ${wrong.length} 道错题
+                    ${analysis.weaknesses ? `｜薄弱领域：${analysis.weaknesses.slice(0,3).join('、')}` : ''}
+                </div>
+            </div>
+        `;
+
+        // 全局统计
+        const statusCount = {};
+        wrong.forEach(p => {
+            const s = p.status || '未知';
+            statusCount[s] = (statusCount[s] || 0) + 1;
+        });
+
+        html += `
+            <div class="card">
+                <h3>📊 错题统计</h3>
+                <div style="display:flex;flex-wrap:wrap;gap:12px;margin-top:8px;">
+                    ${Object.entries(statusCount).map(([status, count]) => `
+                        <span style="padding:4px 14px;border-radius:20px;background:var(--bg-primary);border:1px solid var(--border);">
+                            ${status}: ${count} 题
+                        </span>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+
+        // 按标签展示错题
+        html += `<div class="card"><h3>📂 按知识点分组</h3>`;
+        for (const tag of sortedTags) {
+            const problems = tagGroups[tag];
+            html += `
+                <details style="margin-top:8px;padding:8px 12px;background:var(--bg-primary);border-radius:6px;border:1px solid var(--border);" open>
+                    <summary style="cursor:pointer;font-weight:500;color:var(--text-secondary);">
+                        ${tag}
+                        <span class="tag-count">${problems.length} 题</span>
+                    </summary>
+                    <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">
+                        ${problems.map(p => {
+                            const statusClass = p.status === 'WA' ? 'WA' : p.status === 'TLE' ? 'TLE' : p.status === 'RE' ? 'RE' : '';
+                            const diff = p.difficulty || '未知';
+                            return `
+                                <a href="https://www.luogu.com.cn/problem/${p.pid}" target="_blank" class="problem-item">
+                                    <span class="status-badge ${statusClass}">${p.status || '??'}</span>
+                                    ${p.pid}
+                                    ${diff !== '暂无评定' ? `<span class="difficulty-tag"><span class="diff-color-dot" style="background:${diffColors[diff] || '#95a5a6'};"></span>${diff}</span>` : ''}
+                                </a>
+                            `;
+                        }).join('')}
+                    </div>
+                </details>
+            `;
+        }
+        html += `</div>`;
+
+        container.innerHTML = html;
+    }
+
+    async function loadData() {
+        try {
+            // 优先从 localStorage 读取缓存
+            const cached = localStorage.getItem('oi_last_result');
+            if (cached) {
+                const data = JSON.parse(cached);
+                if (data.wrong_problems) {
+                    render(data);
+                    return;
+                }
+            }
+
+            // 尝试从服务器加载
+            const resp = await fetch('/data/result.json');
+            if (!resp.ok) {
+                document.getElementById('content').innerHTML = `
+                    <div class="empty-state">
+                        <div class="emoji">📊</div>
+                        <h2>暂无数据</h2>
+                        <p style="color:var(--text-secondary);">请先在 <a href="/" style="color:var(--accent);">分析面板</a> 运行分析</p>
+                    </div>
+                `;
+                return;
+            }
+            const data = await resp.json();
+            render(data);
+        } catch (e) {
+            document.getElementById('content').innerHTML = `
+                <div class="empty-state">
+                    <div class="emoji">⚠️</div>
+                    <h2>加载失败</h2>
+                    <p style="color:var(--text-secondary);">${e.message}</p>
+                    <p style="color:var(--text-secondary);font-size:0.9rem;margin-top:8px;">请先在分析面板运行分析</p>
+                </div>
+            `;
+        }
+    }
+
+    // 页面加载时自动加载
+    document.addEventListener('DOMContentLoaded', loadData);
+</script>
+</body>
+</html>
