@@ -268,6 +268,7 @@
     <div class="input-group">
         <input type="text" id="luoguUid" placeholder="洛谷 UID（必填）" value="" />
         <input type="text" id="atcoderUser" placeholder="AtCoder 用户名（选填）" value="" />
+        <input type="password" id="apiKey" placeholder="DeepSeek API Key（选填）" value="" style="flex:1.5; min-width:200px;" />
         <button id="analyzeBtn" class="primary-btn">🚀 开始分析</button>
     </div>
 
@@ -619,6 +620,7 @@
     document.getElementById('analyzeBtn').addEventListener('click', async function () {
         const uid = document.getElementById('luoguUid').value.trim();
         const user = document.getElementById('atcoderUser').value.trim();
+        const apiKey = document.getElementById('apiKey').value.trim();
         if (!uid) { alert('请输入洛谷 UID'); return; }
 
         const container = document.getElementById('dashboard');
@@ -637,7 +639,7 @@
             const resp = await fetch('/analyze', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ luogu_uid: uid, atcoder_user: user })
+                body: JSON.stringify({ luogu_uid: uid, atcoder_user: user, api_key: apiKey})
             });
             if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
             const data = await resp.json();

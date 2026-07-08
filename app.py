@@ -8,7 +8,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from crawler import LuoguCrawler, AtCoderCrawler
 from analyzer import Analyzer
-from config import LUOGU_COOKIE
+from config import DEEPSEEK_API_KEY, LUOGU_COOKIE
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
@@ -25,6 +25,7 @@ def analyze():
         data = request.get_json()
         luogu_uid = data.get('luogu_uid', '').strip()
         atcoder_user = data.get('atcoder_user', '').strip()
+        user_api_key = data.get('api_key', '').strip()
 
         if not luogu_uid:
             return jsonify({'error': '请输入洛谷 UID'}), 400
@@ -184,7 +185,12 @@ def analyze():
         atcoder_elo_history.sort(key=lambda x: x.get('time') or 0)
 
         # ---------- 6. DeepSeek 分析 ----------
-        analyzer = Analyzer()
+        # 优先使用用户提供的 API Key，否则使用配置文件中的
+        api_key = user_api_key if user_api_key else DEEPSEEK_API_KEY
+        if not api_key:
+            return jsonify({'error': '请提供 DeepSeek API Key，或在 config.py 中配置'}), 400
+
+        analyzer = Analyzer(api_key=api_key)
         analysis_result = analyzer.analyze(
             rated_contests,
             atcoder_data,
@@ -223,6 +229,7 @@ def chat():
     try:
         data = request.get_json()
         user_message = data.get('message', '').strip()
+        user_api_key = data.get('api_key', '').strip()
         if not user_message:
             return jsonify({'error': '请输入问题'}), 400
 
@@ -235,8 +242,12 @@ def chat():
 
         context_summary = _build_chat_context(result_data)
 
+        api_key = user_api_key if user_api_key else DEEPSEEK_API_KEY
+        if not api_key:
+            return jsonify({'error': '请提供 DeepSeek API Key，或在 config.py 中配置'}), 400
+
         from analyzer import Analyzer
-        analyzer = Analyzer()
+        analyzer = Analyzer(api_key=api_key)
         reply = analyzer.chat_with_context(context_summary, user_message)
         return jsonify({'reply': reply})
 
@@ -250,6 +261,7 @@ def chat_stream():
     try:
         data = request.get_json()
         user_message = data.get('message', '').strip()
+        user_api_key = data.get('api_key', '').strip()
         if not user_message:
             return jsonify({'error': '请输入问题'}), 400
 
@@ -262,8 +274,12 @@ def chat_stream():
 
         context = _build_chat_context(result_data)
 
+        api_key = user_api_key if user_api_key else DEEPSEEK_API_KEY
+        if not api_key:
+            return jsonify({'error': '请提供 DeepSeek API Key，或在 config.py 中配置'}), 400
+
         from analyzer import Analyzer
-        analyzer = Analyzer()
+        analyzer = Analyzer(api_key=api_key)
         return analyzer.stream_chat(context, user_message)
 
     except Exception as e:
