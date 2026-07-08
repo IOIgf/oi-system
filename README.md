@@ -29,35 +29,45 @@
 
 ### 2. 安装
 
+```bash
 git clone https://github.com/your-username/oi-training-system.git
 cd oi-training-system
 pip install -r requirements.txt
+```
 
 ### 3. 配置
 
-复制 config.example.py 为 config.py：
+复制 `config.example.py` 为 `config.py`：
 
+```bash
 cp config.example.py config.py
+```
 
-在 config.py 中填写 DeepSeek API Key：
+在 `config.py` 中填写 **DeepSeek API Key**：
 
+```python
 DEEPSEEK_API_KEY = "sk-你的密钥"
+```
 
-Cookie 自动获取：
+**Cookie 自动获取：**
+
 1. 在 Chrome 中登录洛谷和 AtCoder
 2. 程序会自动从 Chrome 读取 Cookie，无需手动填写
-3. 如果自动读取失败，可在 config.py 中手动配置 LUOGU_COOKIE
+3. 如果自动读取失败，可在 `config.py` 中手动配置 `LUOGU_COOKIE`
 
 ### 4. 运行
 
+```bash
 python app.py
+```
 
-浏览器打开 http://localhost:5000 即可开始使用。
+浏览器打开 `http://localhost:5000` 即可开始使用。
 
 ---
 
 ## 📁 项目结构
 
+```
 oi-system/
 ├── app.py                 # Flask 后端主程序
 ├── crawler.py             # 爬虫模块（洛谷 + AtCoder）
@@ -71,6 +81,7 @@ oi-system/
 │   └── contests.html      # 比赛详情
 └── data/                  # 运行时生成的数据
     └── result.json
+```
 
 ---
 
@@ -78,11 +89,11 @@ oi-system/
 
 | 层次 | 技术 |
 |:---|:---|
-| 后端 | Python 3.8+、Flask |
-| 前端 | 原生 HTML/CSS/JS、ECharts |
-| AI | DeepSeek API（支持流式输出） |
-| 爬虫 | Requests、BeautifulSoup、Selenium |
-| 打包 | PyInstaller（可选） |
+| **后端** | Python 3.8+、Flask |
+| **前端** | 原生 HTML/CSS/JS、ECharts |
+| **AI** | DeepSeek API（支持流式输出） |
+| **爬虫** | Requests、BeautifulSoup、Selenium |
+| **打包** | PyInstaller（可选） |
 
 ---
 
@@ -115,9 +126,9 @@ oi-system/
 ## 📝 注意事项
 
 - 首次运行时会自动下载 ChromeDriver（需网络）
-- 数据保存在 data/result.json，刷新页面不丢失
-- 如使用打包后的 .exe 文件，同样需要 Chrome 浏览器
-- AI 教练需要先运行分析生成 data/result.json
+- 数据保存在 `data/result.json`，刷新页面不丢失
+- 如使用打包后的 `.exe` 文件，同样需要 Chrome 浏览器
+- AI 教练需要先运行分析生成 `data/result.json`
 
 ---
 
