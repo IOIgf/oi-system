@@ -29,8 +29,8 @@
 ### 2. 安装
 
 ```bash
-git clone https://github.com/your-username/oi-training-system.git
-cd oi-training-system
+git clone https://github.com/IOIgf/oi-system/oi-system.git
+cd oi-system
 pip install -r requirements.txt
 ```
 
