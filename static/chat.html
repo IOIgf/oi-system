@@ -66,6 +66,7 @@
             transition: 0.2s;
         }
         nav a:hover { background: var(--accent); color: #1a1a1a; }
+        nav .nav-actions { display: flex; gap: 0.8rem; align-items: center; flex-wrap: wrap; }
 
         .theme-switch { display: flex; gap: 0.5rem; }
         .theme-switch button {
@@ -216,7 +217,8 @@
 <div class="container">
     <nav>
         <span class="brand">🧠 AI 教练</span>
-        <div style="display:flex; gap:1rem; align-items:center;">
+        <div class="nav-actions">
+            <button id="newChatBtn" style="padding:4px 14px; border-radius:6px; border:1px solid var(--border); background:var(--bg-primary); color:var(--text-primary); cursor:pointer; font-size:0.9rem;">➕ 新对话</button>
             <a href="/">← 返回分析面板</a>
             <div class="theme-switch">
                 <button onclick="setTheme('light')">☀️</button>
@@ -251,12 +253,27 @@
     }
     document.body.className = localStorage.getItem('oi-theme') || 'dark';
 
+    // ========== 对话历史管理 ==========
+    let conversationHistory = [];
+    const MAX_HISTORY = 20;
+
     const messagesContainer = document.getElementById('chatMessages');
     const inputText = document.getElementById('chatInput');
     const sendBtn = document.getElementById('chatSendBtn');
     const apiKeyInput = document.getElementById('chatApiKey');
 
     let isStreaming = false;
+
+    // 新对话
+    document.getElementById('newChatBtn').addEventListener('click', function() {
+        conversationHistory = [];
+        messagesContainer.innerHTML = `
+            <div class="empty-state">
+                💡 新对话已开始，输入问题吧<br>
+                <span style="font-size:0.85rem;">AI 将基于你的训练数据为你解答</span>
+            </div>
+        `;
+    });
 
     inputText.addEventListener('input', function() {
         this.style.height = 'auto';
@@ -302,22 +319,34 @@
         inputText.value = '';
         inputText.style.height = 'auto';
 
+        // 移除空状态
         const empty = messagesContainer.querySelector('.empty-state');
         if (empty) empty.remove();
 
-        const apiKey = apiKeyInput.value.trim();
-
+        // 添加用户消息到界面和历史
         appendMessage('user', message);
+        conversationHistory.push({ role: 'user', content: message });
+
+        // 限制历史长度
+        if (conversationHistory.length > MAX_HISTORY) {
+            conversationHistory = conversationHistory.slice(-MAX_HISTORY);
+        }
+
         sendBtn.disabled = true;
         inputText.disabled = true;
         isStreaming = true;
         showTyping();
 
+        const apiKey = apiKeyInput.value.trim();
+
         try {
             const response = await fetch('/chat/stream', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message, api_key: apiKey })
+                body: JSON.stringify({
+                    messages: conversationHistory,
+                    api_key: apiKey
+                })
             });
 
             if (!response.ok) {
@@ -369,9 +398,18 @@
                 }
             }
 
+            // 最终高亮
             bubble.querySelectorAll('pre code').forEach((block) => {
                 hljs.highlightElement(block);
             });
+
+            // 将 AI 回复加入历史
+            if (fullContent) {
+                conversationHistory.push({ role: 'assistant', content: fullContent });
+                if (conversationHistory.length > MAX_HISTORY) {
+                    conversationHistory = conversationHistory.slice(-MAX_HISTORY);
+                }
+            }
 
         } catch (e) {
             removeTyping();

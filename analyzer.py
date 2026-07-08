@@ -226,17 +226,26 @@ class Analyzer:
             return data["choices"][0]["message"]["content"]
         except Exception as e:
             return f"AI 暂时无法回答，请稍后再试。错误：{str(e)}"
-    def stream_chat(self, context: str, user_message: str):
+    def stream_chat_with_history(self, context: str, messages: List[Dict[str, str]]) -> Response:
+        """
+        支持多轮对话的流式聊天
+        context: 用户数据的上下文摘要（系统提示）
+        messages: 对话历史列表，格式为 [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}, ...]
+        返回 Flask Response 对象（Server-Sent Events）
+        """
+        # 构建完整消息列表：系统提示 + 历史对话
+        full_messages = [
+            {"role": "system", "content": f"你是一位OI竞赛教练，善于根据数据给予具体建议。回答时请基于用户提供的数据，语言亲切、具体，避免泛泛而谈。\n\n{context}"}
+        ] + messages
+
         payload = {
             "model": "deepseek-chat",
-            "messages": [
-                {"role": "system", "content": f"你是一位OI竞赛教练，善于根据数据给予具体建议。回答时请基于用户提供的数据，语言亲切、具体，避免泛泛而谈。\n\n{context}"},
-                {"role": "user", "content": user_message}
-            ],
+            "messages": full_messages,
             "temperature": 0.7,
             "max_tokens": 2000,
             "stream": True
         }
+
         def generate():
             try:
                 resp = requests.post(self.api_url, headers=self.headers, json=payload, stream=True, timeout=60)
@@ -259,4 +268,5 @@ class Analyzer:
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             yield "data: [DONE]\n\n"
+
         return Response(stream_with_context(generate()), mimetype='text/event-stream')

@@ -260,9 +260,9 @@ def chat():
 def chat_stream():
     try:
         data = request.get_json()
-        user_message = data.get('message', '').strip()
+        messages = data.get('messages', [])
         user_api_key = data.get('api_key', '').strip()
-        if not user_message:
+        if not messages:
             return jsonify({'error': '请输入问题'}), 400
 
         result_path = 'data/result.json'
@@ -280,7 +280,7 @@ def chat_stream():
 
         from analyzer import Analyzer
         analyzer = Analyzer(api_key=api_key)
-        return analyzer.stream_chat(context, user_message)
+        return analyzer.stream_chat_with_history(context, messages)
 
     except Exception as e:
         print('❌ 聊天流错误:', traceback.format_exc())
