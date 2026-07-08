@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>比赛详情 · OI 训练系统</title>
     <style>
-        /* ========== 主题变量 ========== */
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', 'Inter', system-ui, sans-serif;
@@ -240,12 +239,97 @@
     }
     document.body.className = localStorage.getItem('oi-theme') || 'dark';
 
+    function renderContestList(contests, platform) {
+        if (!contests || contests.length === 0) {
+            return `<div class="empty-state" style="padding:20px;">暂无 ${platform} 比赛记录</div>`;
+        }
+
+        // 计算平台统计
+        let totalAC = 0, totalProblems = 0;
+        for (const c of contests) {
+            const problems = c.problems || {};
+            // 统一转换为数组，并确保 pid 字段存在
+            const problemList = Array.isArray(problems)
+                ? problems.map(p => ({ ...p, pid: p.pid || '?' }))
+                : Object.entries(problems).map(([pid, info]) => ({ ...info, pid }));
+            const ac = problemList.filter(p => p.status === 'AC').length;
+            const total = c.total_problems || problemList.length;
+            totalAC += ac;
+            totalProblems += total;
+        }
+        const totalRate = totalProblems > 0 ? (totalAC / totalProblems * 100).toFixed(1) : 0;
+
+        let html = `
+            <div class="card">
+                <h2>📅 ${platform} 比赛详情</h2>
+                <div class="subtitle">共 ${contests.length} 场比赛</div>
+                <div class="stats-summary">
+                    <span class="stat-item">📊 通过率 <span class="num">${totalRate}%</span></span>
+                    <span class="stat-item">✅ AC 题数 <span class="num">${totalAC}</span></span>
+                    <span class="stat-item">📝 总题数 <span class="num">${totalProblems}</span></span>
+                </div>
+            </div>
+            <div class="card">
+                <h2>📋 比赛列表</h2>
+        `;
+
+        for (const c of contests) {
+            const problems = c.problems || {};
+            // 统一转换为数组，并确保 pid 字段存在
+            const problemList = Array.isArray(problems)
+                ? problems.map(p => ({ ...p, pid: p.pid || '?' }))
+                : Object.entries(problems).map(([pid, info]) => ({ ...info, pid }));
+
+            const ac = problemList.filter(p => p.status === 'AC').length;
+            const total = c.total_problems || problemList.length;
+            const change = c.elo_change || 0;
+            const changeStr = change > 0 ? `+${change}` : change;
+            const changeClass = change > 0 ? 'positive' : change < 0 ? 'negative' : '';
+
+            const tagCount = {};
+            problemList.forEach(p => {
+                (p.tags || []).forEach(tag => {
+                    tagCount[tag] = (tagCount[tag] || 0) + 1;
+                });
+            });
+            const tagSummary = Object.entries(tagCount).sort((a,b) => b[1]-a[1]).slice(0,5);
+
+            html += `
+                <details class="contest-detail">
+                    <summary>
+                        <span class="contest-name">${c.contest_name || `比赛 ${c.contest_id}`}</span>
+                        <span>
+                            AC ${ac}/${total} 题
+                            ${change !== 0 ? `｜等级分 <span class="elo-change ${changeClass}">${changeStr}</span>` : ''}
+                        </span>
+                    </summary>
+                    <div style="margin-top:8px;">
+                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
+                            ${problemList.map(p => `
+                                <span class="problem-item ${p.status === 'AC' ? 'AC' : p.status === 'WA' ? 'WA' : 'Other'}">
+                                    ${p.pid} ${p.status}
+                                    ${p.difficulty && p.difficulty !== '暂无评定' ? `<span class="difficulty-badge">${p.difficulty}</span>` : ''}
+                                    ${(p.tags || []).slice(0,3).map(t => `<span class="tag-badge">${t}</span>`).join('')}
+                                </span>
+                            `).join('')}
+                            ${problemList.length === 0 ? '<span style="color:var(--text-secondary);font-size:0.85rem;">无提交记录</span>' : ''}
+                        </div>
+                        ${tagSummary.length ? `<div style="margin-top:6px;font-size:0.8rem;color:var(--text-secondary);">知识点：${tagSummary.map(([tag,count]) => `${tag}(${count})`).join('、')}</div>` : ''}
+                    </div>
+                </details>
+            `;
+        }
+
+        html += `</div>`;
+        return html;
+    }
+
     function render(data) {
         const container = document.getElementById('content');
-        const contests = data.luogu_contests || [];
-        const analysis = data.analysis || {};
+        const luoguContests = data.luogu_contests || [];
+        const atcoderContests = data.atcoder_contests || [];
 
-        if (!contests.length) {
+        if (!luoguContests.length && !atcoderContests.length) {
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="emoji">📊</div>
@@ -256,70 +340,9 @@
             return;
         }
 
-        // 统计
-        const totalContests = contests.length;
-        const totalAC = contests.reduce((s, c) => s + (c.accepted_count || 0), 0);
-        const totalProblems = contests.reduce((s, c) => s + (c.total_problems || 0), 0);
-        const totalRate = totalProblems > 0 ? (totalAC / totalProblems * 100).toFixed(1) : 0;
-
-        let html = `
-            <div class="card">
-                <h2>📅 比赛详情</h2>
-                <div class="subtitle">共 ${totalContests} 场 rated 比赛</div>
-                <div class="stats-summary">
-                    <span class="stat-item">📊 总通过率 <span class="num">${totalRate}%</span></span>
-                    <span class="stat-item">✅ AC 题数 <span class="num">${totalAC}</span></span>
-                    <span class="stat-item">📝 总题数 <span class="num">${totalProblems}</span></span>
-                    ${analysis.overall_rating ? `<span class="stat-item">🏅 ${analysis.overall_rating}</span>` : ''}
-                </div>
-            </div>
-        `;
-
-        // 每场比赛
-        html += `<div class="card"><h2>📋 比赛列表</h2>`;
-        for (const c of contests) {
-            const problems = c.problems || [];
-            const ac = c.accepted_count || 0;
-            const total = c.total_problems || 0;
-            const change = c.elo_change || 0;
-            const changeStr = change > 0 ? `+${change}` : change;
-            const changeClass = change > 0 ? 'positive' : change < 0 ? 'negative' : '';
-
-            const tagCount = {};
-            problems.forEach(p => {
-                (p.tags || []).forEach(tag => {
-                    tagCount[tag] = (tagCount[tag] || 0) + 1;
-                });
-            });
-            const tagSummary = Object.entries(tagCount).sort((a,b) => b[1]-a[1]).slice(0,5);
-
-            html += `
-                <details class="contest-detail" open>
-                    <summary>
-                        <span class="contest-name">${c.contest_name || `比赛 ${c.contest_id}`}</span>
-                        <span>
-                            AC ${ac}/${total} 题
-                            ${change !== 0 ? `｜等级分 <span class="elo-change ${changeClass}">${changeStr}</span>` : ''}
-                        </span>
-                    </summary>
-                    <div style="margin-top:8px;">
-                        <div style="display:flex;flex-wrap:wrap;gap:4px;">
-                            ${problems.map(p => `
-                                <span class="problem-item ${p.status === 'AC' ? 'AC' : p.status === 'WA' ? 'WA' : 'Other'}">
-                                    ${p.pid} ${p.status}
-                                    ${p.difficulty && p.difficulty !== '暂无评定' ? `<span class="difficulty-badge">${p.difficulty}</span>` : ''}
-                                    ${(p.tags || []).slice(0,3).map(t => `<span class="tag-badge">${t}</span>`).join('')}
-                                </span>
-                            `).join('')}
-                            ${problems.length === 0 ? '<span style="color:var(--text-secondary);font-size:0.85rem;">无提交记录</span>' : ''}
-                        </div>
-                        ${tagSummary.length ? `<div style="margin-top:6px;font-size:0.8rem;color:var(--text-secondary);">知识点：${tagSummary.map(([tag,count]) => `${tag}(${count})`).join('、')}</div>` : ''}
-                    </div>
-                </details>
-            `;
-        }
-        html += `</div>`;
-
+        let html = '';
+        html += renderContestList(luoguContests, '洛谷');
+        html += renderContestList(atcoderContests, 'AtCoder');
         container.innerHTML = html;
     }
 
@@ -328,7 +351,7 @@
             const cached = localStorage.getItem('oi_last_result');
             if (cached) {
                 const data = JSON.parse(cached);
-                if (data.luogu_contests) {
+                if (data.luogu_contests || data.atcoder_contests) {
                     render(data);
                     return;
                 }

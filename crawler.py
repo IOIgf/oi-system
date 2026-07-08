@@ -101,9 +101,11 @@ class LuoguCrawler:
     _algorithm_tag_ids = None    # 算法标签 ID 集合
     _cookie_printed = False
     _session_initialized = False
+    _cached_cookie = None
 
     def __init__(self, cookie: str = None):
         self.session = requests.Session()
+        self.session.proxies = {}
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -113,15 +115,38 @@ class LuoguCrawler:
 
         if cookie:
             self._set_cookie_from_string(cookie)
-        else:
-            cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
+            return
+
+        # 尝试从缓存获取
+        if LuoguCrawler._cached_cookie:
+            self._set_cookie_from_string(LuoguCrawler._cached_cookie)
+            return
+
+        # 1. 尝试使用 browser_cookie3（最快，无需启动浏览器）
+        try:
+            import browser_cookie3
+            cj = browser_cookie3.chrome(domain_name='luogu.com.cn')
+            cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
             if cookie_str:
+                LuoguCrawler._cached_cookie = cookie_str
                 self._set_cookie_from_string(cookie_str)
                 if not LuoguCrawler._cookie_printed:
-                    print("✅ 已通过 Selenium 读取洛谷 Cookie")
+                    print("✅ 已通过 browser_cookie3 读取洛谷 Cookie")
                     LuoguCrawler._cookie_printed = True
-            else:
-                print("⚠️ 未获取到洛谷 Cookie，请确保 Chrome 已登录洛谷")
+                return
+        except Exception as e:
+            print(f"⚠️ browser_cookie3 读取失败: {e}")
+
+        # 2. 备用方案：Selenium（启动浏览器，较慢）
+        cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
+        if cookie_str:
+            LuoguCrawler._cached_cookie = cookie_str
+            self._set_cookie_from_string(cookie_str)
+            if not LuoguCrawler._cookie_printed:
+                print("✅ 已通过 Selenium 读取洛谷 Cookie")
+                LuoguCrawler._cookie_printed = True
+        else:
+            print("⚠️ 未获取到洛谷 Cookie，请确保 Chrome 已登录洛谷")
 
     def _set_cookie_from_string(self, cookie_str: str):
         cookie_dict = {}
@@ -262,7 +287,7 @@ class LuoguCrawler:
                 if page * per_page >= total_count:
                     break
                 page += 1
-                time.sleep(0.1)  # 减少延迟
+                time.sleep(0.1)
 
             except Exception as e:
                 print(f"获取比赛 {contest_id} 第 {page} 页异常: {e}")
@@ -361,7 +386,6 @@ class LuoguCrawler:
     def get_problem_tags(self, pid: str, contest_id: str = None) -> List[str]:
         cache_key = f"{pid}_{contest_id}" if contest_id else pid
 
-        # 检查类级缓存
         if cache_key in LuoguCrawler._problem_cache:
             return LuoguCrawler._problem_cache[cache_key]
 
@@ -384,7 +408,6 @@ class LuoguCrawler:
                 LuoguCrawler._problem_cache[cache_key] = []
                 return []
 
-            # 确保标签映射已加载
             self._ensure_tag_map()
             algorithm_ids = LuoguCrawler._algorithm_tag_ids or set()
             tag_map = LuoguCrawler._tag_map_cache or {}
@@ -482,9 +505,11 @@ class LuoguCrawler:
 # ==================== AtCoder 爬虫 ====================
 class AtCoderCrawler:
     _cookie_printed = False
+    _cached_cookie = None
 
     def __init__(self, cookie: str = None):
         self.session = requests.Session()
+        self.session.proxies = {}
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -494,15 +519,36 @@ class AtCoderCrawler:
 
         if cookie:
             self._set_cookie_from_string(cookie)
-        else:
-            cookie_str = get_cookie_from_chrome('atcoder.jp')
+            return
+
+        if AtCoderCrawler._cached_cookie:
+            self._set_cookie_from_string(AtCoderCrawler._cached_cookie)
+            return
+
+        try:
+            import browser_cookie3
+            cj = browser_cookie3.chrome(domain_name='atcoder.jp')
+            cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
             if cookie_str:
+                AtCoderCrawler._cached_cookie = cookie_str
                 self._set_cookie_from_string(cookie_str)
                 if not AtCoderCrawler._cookie_printed:
-                    print("✅ 已通过 Selenium 读取 AtCoder Cookie")
+                    print("✅ 已通过 browser_cookie3 读取 AtCoder Cookie")
                     AtCoderCrawler._cookie_printed = True
-            else:
-                print("⚠️ 未获取到 AtCoder Cookie，请确保 Chrome 已登录 AtCoder")
+                return
+        except Exception:
+            pass
+
+        # 备用：使用 Selenium
+        cookie_str = get_cookie_from_chrome('atcoder.jp')
+        if cookie_str:
+            AtCoderCrawler._cached_cookie = cookie_str
+            self._set_cookie_from_string(cookie_str)
+            if not AtCoderCrawler._cookie_printed:
+                print("✅ 已通过 Selenium 读取 AtCoder Cookie")
+                AtCoderCrawler._cookie_printed = True
+        else:
+            print("⚠️ 未获取到 AtCoder Cookie，请确保 Chrome 已登录 AtCoder")
 
     def _set_cookie_from_string(self, cookie_str: str):
         cookie_dict = {}
@@ -579,6 +625,38 @@ class AtCoderCrawler:
             print(f"获取 AtCoder 评级失败: {e}")
             return {"rating": "N/A", "rank": "N/A"}
 
+    def get_contest_tasks(self, contest_id: str) -> List[Dict[str, str]]:
+        """
+        从 AtCoder /tasks 页面获取该场比赛的所有题目列表
+        返回: [{"pid": "abc465_a", "title": "..."}, ...]
+        """
+        url = f"https://atcoder.jp/contests/{contest_id}/tasks"
+        try:
+            resp = self.session.get(url, timeout=10)
+            if resp.status_code != 200:
+                return []
+            soup = BeautifulSoup(resp.text, "html.parser")
+            # AtCoder 题目列表在 id="main-container" 的 table 中
+            table = soup.select_one("#main-container table")
+            if not table:
+                return []
+            tasks = []
+            rows = table.find_all("tr")[1:]  # 跳过表头
+            for row in rows:
+                cols = row.find_all("td")
+                if len(cols) >= 2:
+                    link = cols[0].find("a")
+                    if link:
+                        pid = link.get("href", "").split("/")[-1]
+                        tasks.append({
+                            "pid": pid,
+                            "title": link.text.strip(),
+                        })
+            return tasks
+        except Exception as e:
+            print(f"获取 AtCoder 比赛 {contest_id} 题目列表失败: {e}")
+            return []
+
     def _get_contest_standings(self, contest_id: str, retries: int = 3) -> Dict[str, Any]:
         url = f"https://atcoder.jp/contests/{contest_id}/standings/json"
         for attempt in range(retries):
@@ -628,7 +706,15 @@ class AtCoderCrawler:
                 rating = item["OldRating"]
 
             problems = {}
+            total_problems = 0
+            task_list = []
             if contest_id:
+                # 获取该场比赛的题目列表（用于统计总数）
+                tasks = self.get_contest_tasks(contest_id)
+                task_list = tasks
+                total_problems = len(tasks)
+
+                # 获取榜单数据（包含提交状态）
                 standings = self._get_contest_standings(contest_id)
                 if standings and "StandingsData" in standings:
                     target_username_lower = username.lower()
@@ -647,7 +733,11 @@ class AtCoderCrawler:
                                 elif status_code == 0:
                                     status = "未提交"
                                 else:
-                                    status = f"未知({status_code})"
+                                    # 对于未知状态码，用分数辅助判断
+                                    if score > 0:
+                                        status = "AC"
+                                    else:
+                                        status = "WA"
                                 problems[task_key] = {"status": status, "score": score}
                             break
                     else:
@@ -663,6 +753,8 @@ class AtCoderCrawler:
                 "rank": rank,
                 "rating": rating,
                 "problems": problems,
+                "total_problems": total_problems,
+                "task_list": task_list,
                 "end_time": item.get("EndTime"),
             }
 
