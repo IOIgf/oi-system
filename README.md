@@ -30,8 +30,8 @@
 ### 2. 安装
 
 ```bash
-git clone https://github.com/your-username/oi-training-system.git
-cd oi-training-system
+git clone https://github.com/IOIgf/oi-system.git
+cd oi-system
 pip install -r requirements.txt
 ```
 
@@ -61,7 +61,7 @@ DEEPSEEK_API_KEY = "sk-你的密钥"
 python app.py
 ```
 
-浏览器打开 `http://localhost:5000` 即可开始使用。
+浏览器打开 `http://localhost:5001` 即可开始使用。
 
 ---
 
