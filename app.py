@@ -40,7 +40,6 @@ def analyze():
 
         history = sorted(elo_info['history'], key=lambda x: x.get('time') or 0)
 
-        # 构建等级分历史（用于图表）
         elo_history = []
         for record in history:
             elo_history.append({
@@ -185,18 +184,39 @@ def analyze():
         atcoder_elo_history.sort(key=lambda x: x.get('time') or 0)
 
         # ---------- 6. DeepSeek 分析 ----------
-        # 优先使用用户提供的 API Key，否则使用配置文件中的
+        # 检查是否提供 API Key（用户输入或配置文件）
         api_key = user_api_key if user_api_key else DEEPSEEK_API_KEY
-        if not api_key:
-            return jsonify({'error': '请提供 DeepSeek API Key，或在 config.py 中配置'}), 400
-
-        analyzer = Analyzer(api_key=api_key)
-        analysis_result = analyzer.analyze(
-            rated_contests,
-            atcoder_data,
-            luogu_awards,
-            atcoder_rating
-        )
+        if api_key:
+            try:
+                analyzer = Analyzer(api_key=api_key)
+                analysis_result = analyzer.analyze(
+                    rated_contests,
+                    atcoder_data,
+                    luogu_awards,
+                    atcoder_rating
+                )
+            except Exception as e:
+                # 如果 AI 分析失败，返回错误信息但不影响其他数据
+                analysis_result = {
+                    "error": f"AI 分析失败: {str(e)}",
+                    "overall_rating": "AI 分析出错",
+                    "strengths": [],
+                    "weaknesses": [],
+                    "match_reviews": ["AI 分析过程中出现错误，请检查 API Key 或网络"],
+                    "suggestions": "请稍后重试或检查 API Key",
+                    "daily_mission": []
+                }
+        else:
+            # 没有 API Key，返回空分析
+            analysis_result = {
+                "error": "未提供 DeepSeek API Key，AI 分析已跳过",
+                "overall_rating": "未分析（请提供 API Key）",
+                "strengths": [],
+                "weaknesses": [],
+                "match_reviews": ["请提供 DeepSeek API Key 以获取 AI 分析"],
+                "suggestions": "请配置 API Key 后重新分析",
+                "daily_mission": []
+            }
 
         # ---------- 7. 组装结果 ----------
         final_result = {

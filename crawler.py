@@ -12,22 +12,22 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import sys
+import os
+import tempfile
 
 # ==================== Selenium Cookie 读取（全局缓存） ====================
 _SELENIUM_COOKIE_CACHE = {}
 
 def get_cookie_from_chrome(domain: str) -> str:
-    import os
-    import tempfile
-    from selenium.common.exceptions import WebDriverException
-    from webdriver_manager.chrome import ChromeDriverManager
-
+    """使用 Selenium 从 Chrome 获取完整的 Cookie（包含所有字段）"""
     if domain in _SELENIUM_COOKIE_CACHE:
         return _SELENIUM_COOKIE_CACHE[domain]
 
+    # 抑制 webdriver-manager 日志
     os.environ['WDM_LOG_LEVEL'] = '0'
     os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
 
+    # 使用默认用户数据目录，保留登录状态
     user_data_dir = os.path.expanduser('~') + '/AppData/Local/Google/Chrome/User Data'
     if not os.path.exists(user_data_dir):
         user_data_dir = tempfile.mkdtemp()
@@ -47,7 +47,6 @@ def get_cookie_from_chrome(domain: str) -> str:
     options.add_argument('--profile-directory=Default')
 
     try:
-        # 优先使用打包目录下的 chromedriver
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
             local_driver = os.path.join(base_dir, 'chromedriver.exe')
@@ -69,15 +68,19 @@ def get_cookie_from_chrome(domain: str) -> str:
             cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
             _SELENIUM_COOKIE_CACHE[domain] = cookie_str
             return cookie_str
-    except Exception:
-        pass
-    return None
+        else:
+            print(f"⚠️ Selenium 未获取到 {domain} 的 Cookie，请确认 Chrome 已登录 {domain}")
+            return None
+    except Exception as e:
+        print(f"⚠️ Selenium 读取 {domain} Cookie 失败: {e}")
+        return None
 
 
 # ==================== 洛谷爬虫 ====================
 class LuoguCrawler:
     _cached_cookie = None
     _cookie_printed = False
+    _cookie_read_attempted = False
     _problem_cache = {}
     _tag_map_cache = None
     _algorithm_tag_ids = None
@@ -101,48 +104,20 @@ class LuoguCrawler:
             self._set_cookie_from_string(LuoguCrawler._cached_cookie)
             return
 
-        # 检测是否处于打包环境
-        is_frozen = getattr(sys, 'frozen', False)
+        if LuoguCrawler._cookie_read_attempted:
+            return
 
-        # 如果是打包环境，优先使用 Selenium
-        if is_frozen:
-            cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
-            if cookie_str:
-                LuoguCrawler._cached_cookie = cookie_str
-                self._set_cookie_from_string(cookie_str)
-                if not LuoguCrawler._cookie_printed:
-                    print("✅ 已通过 Selenium 读取洛谷 Cookie")
-                    LuoguCrawler._cookie_printed = True
-                return
-        else:
-            # 开发环境：优先使用 browser_cookie3（速度快）
-            try:
-                import browser_cookie3
-                cj = browser_cookie3.chrome(domain_name='www.luogu.com.cn')
-                cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
-                if cookie_str:
-                    LuoguCrawler._cached_cookie = cookie_str
-                    self._set_cookie_from_string(cookie_str)
-                    if not LuoguCrawler._cookie_printed:
-                        print("✅ 已通过 browser_cookie3 读取洛谷 Cookie")
-                        LuoguCrawler._cookie_printed = True
-                    return
-            except Exception as e:
-                print(f"⚠️ browser_cookie3 失败: {e}")
+        LuoguCrawler._cookie_read_attempted = True
 
-        # 最后尝试 Selenium（如果不是打包环境但之前未尝试）
-        if not is_frozen:
-            try:
-                cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
-                if cookie_str:
-                    LuoguCrawler._cached_cookie = cookie_str
-                    self._set_cookie_from_string(cookie_str)
-                    if not LuoguCrawler._cookie_printed:
-                        print("✅ 已通过 Selenium 读取洛谷 Cookie")
-                        LuoguCrawler._cookie_printed = True
-                    return
-            except Exception as e:
-                print(f"⚠️ Selenium 读取失败: {e}")
+        # 直接使用 Selenium 读取完整 Cookie
+        cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
+        if cookie_str:
+            LuoguCrawler._cached_cookie = cookie_str
+            self._set_cookie_from_string(cookie_str)
+            if not LuoguCrawler._cookie_printed:
+                print("✅ 已通过 Selenium 读取洛谷 Cookie")
+                LuoguCrawler._cookie_printed = True
+            return
 
         print("⚠️ 未获取到洛谷 Cookie，请确保 Chrome 已登录洛谷")
         print("   或手动在 config.py 中配置 LUOGU_COOKIE")
@@ -207,7 +182,7 @@ class LuoguCrawler:
             print(f"获取比赛 {contest_id} 信息失败: {e}")
         return {"id": contest_id, "name": f"比赛 {contest_id}"}
 
-    # ==================== 比赛提交记录 ====================
+    # ==================== 比赛提交记录（优先 JSON，失败时回退 HTML） ====================
     def get_contest_submissions(self, uid: str, contest_id: str) -> List[Dict[str, Any]]:
         all_submissions = []
         page = 1
@@ -216,74 +191,160 @@ class LuoguCrawler:
         while page <= max_pages:
             url = f"https://www.luogu.com.cn/record/list?user={uid}&contestId={contest_id}&page={page}"
             try:
-                resp = self.session.get(url, timeout=10)
+                # 使用浏览器模拟请求头
+                headers = {
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+                    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+                    "Referer": "https://www.luogu.com.cn/",
+                    "Connection": "keep-alive",
+                    "Upgrade-Insecure-Requests": "1",
+                }
+                resp = self.session.get(url, headers=headers, timeout=10)
                 if resp.status_code != 200:
                     break
 
                 soup = BeautifulSoup(resp.text, "html.parser")
+
+                # ---------- 方法1：尝试从 window._feInjection 提取 JSON ----------
                 script_tag = None
                 for script in soup.find_all("script"):
                     if script.string and "window._feInjection" in script.string:
                         script_tag = script
                         break
-                if not script_tag:
-                    break
 
-                script_content = script_tag.string
                 data = None
-                for pattern in [
-                    r'decodeURIComponent\("(.*?)"\)',
-                    r"decodeURIComponent\(%22(.*?)%22\)",
-                    r"window\._feInjection\s*=\s*(\{.*?\});"
-                ]:
-                    match = re.search(pattern, script_content, re.DOTALL)
-                    if match:
-                        try:
-                            json_str = urllib.parse.unquote(match.group(1))
-                            data = json.loads(json_str)
-                            break
-                        except:
+                if script_tag:
+                    script_content = script_tag.string
+                    # 多种正则匹配
+                    patterns = [
+                        r'decodeURIComponent\("(.*?)"\)',
+                        r"decodeURIComponent\(%22(.*?)%22\)",
+                        r"window\._feInjection\s*=\s*(\{.*?\});"
+                    ]
+                    for pattern in patterns:
+                        match = re.search(pattern, script_content, re.DOTALL)
+                        if match:
+                            try:
+                                json_str = urllib.parse.unquote(match.group(1))
+                                data = json.loads(json_str)
+                                break
+                            except:
+                                continue
+                    # 额外：匹配 JSON.parse(decodeURIComponent(...)) 格式
+                    if not data:
+                        match = re.search(r'JSON\.parse\(decodeURIComponent\(%22(.*?)%22\)\)', script_content)
+                        if match:
+                            try:
+                                json_str = urllib.parse.unquote(match.group(1))
+                                data = json.loads(json_str)
+                            except:
+                                pass
+
+                if data:
+                    records_data = data.get("currentData", {}).get("records", {}).get("result", [])
+                    if records_data:
+                        status_map = {
+                            12: "AC", 13: "WA", 14: "WA", 15: "TLE", 16: "MLE",
+                            17: "RE", 18: "CE", 19: "UKE", 20: "OLE", 21: "PC", 11: "AC"
+                        }
+                        for item in records_data:
+                            pid = item.get("problem", {}).get("pid")
+                            if not pid:
+                                continue
+                            status_code = item.get("status")
+                            status_text = status_map.get(status_code, str(status_code))
+                            score = item.get("score") or 0
+                            submit_time = item.get("submitTime")
+                            full_score = item.get("problem", {}).get("fullScore") or 0
+                            all_submissions.append({
+                                "pid": pid,
+                                "status": status_text,
+                                "score": score,
+                                "submitTime": submit_time,
+                                "fullScore": full_score,
+                            })
+
+                        # 判断是否还有下一页
+                        per_page = data.get("currentData", {}).get("records", {}).get("perPage")
+                        total_count = data.get("currentData", {}).get("records", {}).get("count")
+                        if per_page is None:
+                            per_page = 20
+                        if total_count is None:
+                            if len(records_data) < per_page:
+                                break
+                            page += 1
                             continue
-                if not data:
+                        if page * per_page >= total_count:
+                            break
+                        page += 1
+                        time.sleep(0.1)
+                        continue
+
+                # ---------- 方法2：JSON 解析失败，回退到 HTML 表格解析 ----------
+                table = soup.find("table", class_=re.compile(r"table"))
+                if not table:
+                    break
+                tbody = table.find("tbody")
+                if not tbody:
+                    break
+                rows = tbody.find_all("tr")
+                if not rows:
                     break
 
-                records_data = data.get("currentData", {}).get("records", {}).get("result", [])
-                if not records_data:
-                    break
-
-                status_map = {
-                    12: "AC", 13: "WA", 14: "WA", 15: "TLE", 16: "MLE",
-                    17: "RE", 18: "CE", 19: "UKE", 20: "OLE", 21: "PC", 11: "AC"
+                status_map_html = {
+                    "Accepted": "AC", "AC": "AC",
+                    "Wrong Answer": "WA", "WA": "WA",
+                    "Time Limit Exceeded": "TLE", "TLE": "TLE",
+                    "Memory Limit Exceeded": "MLE", "MLE": "MLE",
+                    "Runtime Error": "RE", "RE": "RE",
+                    "Compile Error": "CE", "CE": "CE",
+                    "Unkown Error": "UKE", "UKE": "UKE",
+                    "Output Limit Exceeded": "OLE", "OLE": "OLE",
+                    "Pending": "Pending",
+                    "Judging": "Judging",
                 }
 
-                for item in records_data:
-                    pid = item.get("problem", {}).get("pid")
-                    if not pid:
+                for tr in rows:
+                    tds = tr.find_all("td")
+                    if len(tds) < 7:
                         continue
-                    status_code = item.get("status")
-                    status_text = status_map.get(status_code, str(status_code))
-                    score = item.get("score") or 0
-                    submit_time = item.get("submitTime")
-                    full_score = item.get("problem", {}).get("fullScore") or 0
+                    problem_td = tds[1] if len(tds) > 1 else None
+                    if not problem_td:
+                        continue
+                    link = problem_td.find("a")
+                    pid = link.text.strip() if link else problem_td.text.strip()
+
+                    status_td = tds[2] if len(tds) > 2 else None
+                    if status_td:
+                        status_link = status_td.find("a")
+                        status_text = status_link.text.strip() if status_link else status_td.text.strip()
+                        status = status_map_html.get(status_text, status_text)
+                    else:
+                        status = "Unknown"
+
+                    score = 0
+                    if status == "AC":
+                        score = 100
+                    elif status_td:
+                        match = re.search(r"(\d+)", status_td.text.strip())
+                        if match:
+                            score = int(match.group(1))
+
+                    time_td = tds[6] if len(tds) > 6 else None
+                    submit_time = time_td.text.strip() if time_td else ""
 
                     all_submissions.append({
                         "pid": pid,
-                        "status": status_text,
+                        "status": status,
                         "score": score,
                         "submitTime": submit_time,
-                        "fullScore": full_score,
+                        "fullScore": 100,
                     })
 
-                per_page = data.get("currentData", {}).get("records", {}).get("perPage")
-                total_count = data.get("currentData", {}).get("records", {}).get("count")
-                if per_page is None:
-                    per_page = 20
-                if total_count is None:
-                    if len(records_data) < per_page:
-                        break
-                    page += 1
-                    continue
-                if page * per_page >= total_count:
+                # 检查是否有下一页
+                next_link = soup.find("a", class_="next")
+                if not next_link:
                     break
                 page += 1
                 time.sleep(0.1)
@@ -505,6 +566,7 @@ class LuoguCrawler:
 class AtCoderCrawler:
     _cached_cookie = None
     _cookie_printed = False
+    _cookie_read_attempted = False
 
     def __init__(self, cookie: str = None):
         self.session = requests.Session()
@@ -525,44 +587,20 @@ class AtCoderCrawler:
             self._set_cookie_from_string(AtCoderCrawler._cached_cookie)
             return
 
-        is_frozen = getattr(sys, 'frozen', False)
+        if AtCoderCrawler._cookie_read_attempted:
+            return
 
-        if is_frozen:
-            cookie_str = get_cookie_from_chrome('atcoder.jp')
-            if cookie_str:
-                AtCoderCrawler._cached_cookie = cookie_str
-                self._set_cookie_from_string(cookie_str)
-                if not AtCoderCrawler._cookie_printed:
-                    print("✅ 已通过 Selenium 读取 AtCoder Cookie")
-                    AtCoderCrawler._cookie_printed = True
-                return
-        else:
-            try:
-                import browser_cookie3
-                cj = browser_cookie3.chrome(domain_name='atcoder.jp')
-                cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
-                if cookie_str:
-                    AtCoderCrawler._cached_cookie = cookie_str
-                    self._set_cookie_from_string(cookie_str)
-                    if not AtCoderCrawler._cookie_printed:
-                        print("✅ 已通过 browser_cookie3 读取 AtCoder Cookie")
-                        AtCoderCrawler._cookie_printed = True
-                    return
-            except Exception as e:
-                print(f"⚠️ browser_cookie3 失败: {e}")
+        AtCoderCrawler._cookie_read_attempted = True
 
-        if not is_frozen:
-            try:
-                cookie_str = get_cookie_from_chrome('atcoder.jp')
-                if cookie_str:
-                    AtCoderCrawler._cached_cookie = cookie_str
-                    self._set_cookie_from_string(cookie_str)
-                    if not AtCoderCrawler._cookie_printed:
-                        print("✅ 已通过 Selenium 读取 AtCoder Cookie")
-                        AtCoderCrawler._cookie_printed = True
-                    return
-            except Exception as e:
-                print(f"⚠️ Selenium 读取失败: {e}")
+        # 直接使用 Selenium
+        cookie_str = get_cookie_from_chrome('atcoder.jp')
+        if cookie_str:
+            AtCoderCrawler._cached_cookie = cookie_str
+            self._set_cookie_from_string(cookie_str)
+            if not AtCoderCrawler._cookie_printed:
+                print("✅ 已通过 Selenium 读取 AtCoder Cookie")
+                AtCoderCrawler._cookie_printed = True
+            return
 
         print("⚠️ 未获取到 AtCoder Cookie，请确保 Chrome 已登录 AtCoder")
         print("   或手动在 config.py 中配置 LUOGU_COOKIE")
