@@ -14,18 +14,18 @@ from webdriver_manager.chrome import ChromeDriverManager
 import sys
 import os
 import tempfile
+from datetime import datetime
 
 # ==================== Selenium Cookie 读取（全局缓存） ====================
 _SELENIUM_COOKIE_CACHE = {}
+
 def get_cookie_from_chrome(domain: str) -> str:
     if domain in _SELENIUM_COOKIE_CACHE:
         return _SELENIUM_COOKIE_CACHE[domain]
 
-    # 如果两个域都缓存，直接返回
     if len(_SELENIUM_COOKIE_CACHE) >= 2:
         return _SELENIUM_COOKIE_CACHE.get(domain)
 
-    # 一次性获取两个域的 Cookie
     domains = ['www.luogu.com.cn', 'atcoder.jp']
     print("🚀 正在启动 Selenium 读取 Cookie...")
     import os
@@ -68,7 +68,6 @@ def get_cookie_from_chrome(domain: str) -> str:
         service.creation_flags = 0x08000000
         driver = webdriver.Chrome(service=service, options=options)
 
-        # 遍历两个域名，分别获取 Cookie
         for d in domains:
             driver.get(f'https://{d}')
             time.sleep(1.5)
@@ -93,6 +92,7 @@ class LuoguCrawler:
     _problem_cache = {}
     _tag_map_cache = None
     _algorithm_tag_ids = None
+    _problem_title_cache = {}  # 新增：题目名称缓存
 
     def __init__(self, cookie: str = None):
         self.session = requests.Session()
@@ -118,7 +118,6 @@ class LuoguCrawler:
 
         LuoguCrawler._cookie_read_attempted = True
 
-        # 直接使用 Selenium 读取完整 Cookie
         cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
         if cookie_str:
             LuoguCrawler._cached_cookie = cookie_str
@@ -200,7 +199,6 @@ class LuoguCrawler:
         while page <= max_pages:
             url = f"https://www.luogu.com.cn/record/list?user={uid}&contestId={contest_id}&page={page}"
             try:
-                # 使用浏览器模拟请求头
                 headers = {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -215,7 +213,6 @@ class LuoguCrawler:
 
                 soup = BeautifulSoup(resp.text, "html.parser")
 
-                # ---------- 方法1：尝试从 window._feInjection 提取 JSON ----------
                 script_tag = None
                 for script in soup.find_all("script"):
                     if script.string and "window._feInjection" in script.string:
@@ -225,7 +222,6 @@ class LuoguCrawler:
                 data = None
                 if script_tag:
                     script_content = script_tag.string
-                    # 多种正则匹配
                     patterns = [
                         r'decodeURIComponent\("(.*?)"\)',
                         r"decodeURIComponent\(%22(.*?)%22\)",
@@ -240,7 +236,6 @@ class LuoguCrawler:
                                 break
                             except:
                                 continue
-                    # 额外：匹配 JSON.parse(decodeURIComponent(...)) 格式
                     if not data:
                         match = re.search(r'JSON\.parse\(decodeURIComponent\(%22(.*?)%22\)\)', script_content)
                         if match:
@@ -274,7 +269,6 @@ class LuoguCrawler:
                                 "fullScore": full_score,
                             })
 
-                        # 判断是否还有下一页
                         per_page = data.get("currentData", {}).get("records", {}).get("perPage")
                         total_count = data.get("currentData", {}).get("records", {}).get("count")
                         if per_page is None:
@@ -290,7 +284,6 @@ class LuoguCrawler:
                         time.sleep(0.1)
                         continue
 
-                # ---------- 方法2：JSON 解析失败，回退到 HTML 表格解析 ----------
                 table = soup.find("table", class_=re.compile(r"table"))
                 if not table:
                     break
@@ -351,7 +344,6 @@ class LuoguCrawler:
                         "fullScore": 100,
                     })
 
-                # 检查是否有下一页
                 next_link = soup.find("a", class_="next")
                 if not next_link:
                     break
@@ -570,6 +562,61 @@ class LuoguCrawler:
             print(f"获取通过题目统计异常: {e}")
             return {"total": 0, "by_difficulty": {}, "problems": []}
 
+    # ==================== 新增：获取题目真实名称 ====================
+    def get_problem_title(self, pid: str) -> str:
+        """
+        根据题号获取题目名称（带缓存）
+        """
+        if pid in LuoguCrawler._problem_title_cache:
+            return LuoguCrawler._problem_title_cache[pid]
+
+        url = f"https://www.luogu.com.cn/problem/{pid}"
+        headers = {"x-lentille-request": "content-only", "Referer": "https://www.luogu.com.cn/"}
+        try:
+            resp = self.session.get(url, headers=headers, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("status") == 200:
+                    title = data.get("data", {}).get("problem", {}).get("name", "")
+                    if title:
+                        LuoguCrawler._problem_title_cache[pid] = title
+                        return title
+        except Exception as e:
+            print(f"获取题目 {pid} 名称失败: {e}")
+        # 如果获取失败，返回题号本身
+        LuoguCrawler._problem_title_cache[pid] = pid
+        return pid
+    def get_upcoming_contests(self) -> List[Dict[str, Any]]:
+        url = "https://www.luogu.com.cn/contest/list"
+        headers = {"x-lentille-request": "content-only", "Referer": "https://www.luogu.com.cn/"}
+        try:
+            resp = self.session.get(url, headers=headers, timeout=10)
+            if resp.status_code != 200:
+                return []
+            data = resp.json()
+            if data.get("status") != 200:
+                return []
+            contests = data.get("data", {}).get("contests", {}).get("result", [])
+            result = []
+            now = time.time()
+            for c in contests:
+                start_time = c.get("startTime")
+                if start_time and start_time > now:
+                    result.append({
+                        "id": c.get("id"),
+                        "name": c.get("name"),
+                        "startTime": start_time,
+                        "endTime": c.get("endTime"),
+                        "platform": "洛谷",
+                        "url": f"https://www.luogu.com.cn/contest/{c.get('id')}",
+                        "problemCount": c.get("problemCount", 0)
+                    })
+            # 按开始时间升序（最近的在最前）
+            result.sort(key=lambda x: x["startTime"])
+            return result[:20]
+        except Exception as e:
+            print(f"获取洛谷比赛列表失败: {e}")
+            return []
 
 # ==================== AtCoder 爬虫 ====================
 class AtCoderCrawler:
@@ -601,7 +648,6 @@ class AtCoderCrawler:
 
         AtCoderCrawler._cookie_read_attempted = True
 
-        # 直接使用 Selenium
         cookie_str = get_cookie_from_chrome('atcoder.jp')
         if cookie_str:
             AtCoderCrawler._cached_cookie = cookie_str
@@ -833,3 +879,101 @@ class AtCoderCrawler:
             if cid in result_map:
                 ordered_results.append(result_map[cid])
         return ordered_results
+    def get_upcoming_contests(self) -> List[Dict[str, Any]]:
+        """获取 AtCoder 即将开始的比赛（增加详细调试）"""
+        url = "https://atcoder.jp/contests"
+        try:
+            resp = self.session.get(url, timeout=10)
+            print(f"[AT] 状态码: {resp.status_code}")
+            print(f"[AT] 响应长度: {len(resp.text)}")
+            if resp.status_code != 200:
+                return []
+            
+            soup = BeautifulSoup(resp.text, "html.parser")
+            
+            # 定位 upcoming 表格（多种方式）
+            table = None
+            # 方式1: 通过 id
+            table = soup.find("div", id="contest-table-upcoming")
+            if not table:
+                # 方式2: 通过 class
+                table = soup.find("div", class_="contest-table-upcoming")
+            if not table:
+                # 方式3: 查找包含 "Upcoming Contests" 的 panel
+                for panel in soup.find_all("div", class_="panel"):
+                    if panel.find("h3") and "Upcoming Contests" in panel.find("h3").text:
+                        table = panel
+                        break
+            if not table:
+                print("[AT] 未找到 upcoming 表格")
+                return []
+            
+            print("[AT] 找到 upcoming 表格")
+            tbody = table.find("tbody")
+            if not tbody:
+                print("[AT] 未找到 tbody")
+                return []
+            
+            rows = tbody.find_all("tr")
+            print(f"[AT] 找到 {len(rows)} 行")
+            
+            result = []
+            now = time.time()
+            
+            for row in rows:
+                cols = row.find_all("td")
+                if len(cols) < 3:
+                    continue
+                
+                # 时间列
+                time_text = cols[0].text.strip()
+                # 名称列
+                name_link = cols[1].find("a")
+                if not name_link:
+                    continue
+                name = name_link.text.strip()
+                href = name_link.get("href")
+                contest_id = href.split("/")[-1] if href else ""
+                
+                # 解析开始时间
+                try:
+                    # 处理时区
+                    if "+" in time_text:
+                        time_text_clean = time_text.split("+")[0]
+                    else:
+                        time_text_clean = time_text[:19]
+                    start_time = int(datetime.strptime(time_text_clean, "%Y-%m-%d %H:%M:%S").timestamp())
+                except Exception as e:
+                    print(f"[AT] 时间解析失败: '{time_text}', 错误: {e}")
+                    continue
+                
+                if start_time <= now:
+                    continue
+                
+                # 获取题目数（可选）
+                problem_count = 0
+                try:
+                    tasks = self.get_contest_tasks(contest_id)
+                    problem_count = len(tasks)
+                except Exception as e:
+                    print(f"[AT] 获取题目数失败 {contest_id}: {e}")
+                
+                result.append({
+                    "id": contest_id,
+                    "name": name,
+                    "startTime": start_time,
+                    "endTime": None,
+                    "platform": "AtCoder",
+                    "url": f"https://atcoder.jp{href}",
+                    "problemCount": problem_count
+                })
+            
+            result.sort(key=lambda x: x["startTime"])
+            print(f"[AT] 获取到 {len(result)} 场即将开始的比赛")
+            return result[:20]
+        
+        except Exception as e:
+            print(f"[AT] 异常: {e}")
+            import traceback
+            traceback.print_exc()
+            return []

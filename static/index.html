@@ -446,7 +446,42 @@
             <span style="color:var(--text-secondary); font-size:0.85rem;" id="updateTime"></span>
         </div>
     </nav>
-
+    <!-- ===== 比赛倒计时横幅 ===== -->
+    <div id="contestBanner" style="display:none; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; padding: 12px 20px; margin-bottom: 16px; box-shadow: var(--card-shadow);">
+        <div style="display:flex; flex-wrap:wrap; gap:16px; justify-content:space-between; align-items:stretch;">
+            
+            <!-- 洛谷 -->
+            <div id="luoguContest" style="flex:1; min-width:200px; padding:8px 12px; background:var(--bg-primary); border-radius:6px; border-left:4px solid #b8963a;">
+                <div style="font-size:0.75rem; color:var(--text-secondary); font-weight:600;">洛谷</div>
+                <div id="luoguContestName" style="font-weight:500; color:var(--text-primary); font-size:0.95rem;">加载中...</div>
+                <div id="luoguCountdown" style="font-size:1.1rem; font-weight:700; color:var(--accent);"></div>
+            </div>
+            
+            <!-- AtCoder -->
+            <div id="atcoderContest" style="flex:1; min-width:200px; padding:8px 12px; background:var(--bg-primary); border-radius:6px; border-left:4px solid #2ecc71;">
+                <div style="font-size:0.75rem; color:var(--text-secondary); font-weight:600;">AtCoder</div>
+                <div id="atcoderContestName" style="font-weight:500; color:var(--text-primary); font-size:0.95rem;">加载中...</div>
+                <div id="atcoderCountdown" style="font-size:1.1rem; font-weight:700; color:var(--accent);"></div>
+            </div>
+            
+            <!-- 操作按钮 -->
+            <div style="display:flex; flex-direction:column; justify-content:center; gap:6px; padding:4px 0;">
+                <button id="getAdviceBtn" class="primary-btn" style="padding:6px 20px; font-size:0.9rem; width:100%;">🤖 参赛建议</button>
+                <button id="contestNotifyBtn" style="padding:4px 14px; border-radius:6px; border:1px solid var(--border); background:var(--bg-primary); color:var(--text-primary); cursor:pointer; font-size:0.8rem;">🔔 通知</button>
+            </div>
+        </div>
+        
+        <!-- AI 建议显示区 -->
+        <div id="adviceArea" style="display:none; margin-top:12px; padding:12px 16px; background:var(--bg-primary); border-radius:6px; border:1px solid var(--accent);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-weight:600; color:var(--text-primary);">🤖 参赛建议</span>
+                <button id="closeAdviceBtn" style="background:none; border:none; color:var(--text-secondary); cursor:pointer; font-size:1.2rem;">✕</button>
+            </div>
+            <div id="adviceContent" style="line-height:1.7; color:var(--text-secondary); word-wrap:break-word; max-height:300px; overflow-y:auto; font-size:0.95rem;">
+                正在生成建议...
+            </div>
+        </div>
+    </div>
     <!-- 输入表单 -->
     <div class="input-group">
         <input type="text" id="luoguUid" placeholder="洛谷 UID（必填）" value="" />
@@ -484,7 +519,184 @@
             gfm: true
         });
     }
+    // ============================================================
+    //  比赛倒计时 & 参赛建议
+    // ============================================================
+    let nearestContests = {};
+    let countdownInterval = null;
 
+    async function fetchNearestContests() {
+        try {
+            const resp = await fetch('/api/nearest-contests');
+            if (!resp.ok) return;
+            nearestContests = await resp.json();
+            updateContestDisplay();
+        } catch (e) {
+            console.log('获取比赛失败:', e);
+        }
+    }
+
+    function updateContestDisplay() {
+        const banner = document.getElementById('contestBanner');
+        const hasLuogu = nearestContests.luogu;
+        const hasAtcoder = nearestContests.atcoder;
+        
+        if (!hasLuogu && !hasAtcoder) {
+            banner.style.display = 'none';
+            return;
+        }
+        
+        banner.style.display = 'block';
+        
+        // 更新洛谷
+        if (hasLuogu) {
+            document.getElementById('luoguContestName').textContent = hasLuogu.name;
+            updateCountdown('luogu', hasLuogu.startTime);
+        } else {
+            document.getElementById('luoguContestName').textContent = '暂无比赛';
+            document.getElementById('luoguCountdown').textContent = '—';
+        }
+        
+        // 更新 AtCoder
+        if (hasAtcoder) {
+            document.getElementById('atcoderContestName').textContent = hasAtcoder.name;
+            updateCountdown('atcoder', hasAtcoder.startTime);
+        } else {
+            document.getElementById('atcoderContestName').textContent = '暂无比赛';
+            document.getElementById('atcoderCountdown').textContent = '—';
+        }
+    }
+
+    function updateCountdown(platform, startTime) {
+        const el = document.getElementById(`${platform}Countdown`);
+        const now = Date.now() / 1000;
+        const diff = startTime - now;
+        
+        if (diff <= 0) {
+            el.textContent = '已开始 🚀';
+            return;
+        }
+        
+        const days = Math.floor(diff / 86400);
+        const hours = Math.floor((diff % 86400) / 3600);
+        const minutes = Math.floor((diff % 3600) / 60);
+        
+        if (days > 0) {
+            el.textContent = `${days}d ${hours}h ${minutes}m`;
+        } else {
+            el.textContent = `${hours}h ${minutes}m`;
+        }
+    }
+
+    // 获取参赛建议
+    document.getElementById('getAdviceBtn').addEventListener('click', async function() {
+        const luoguUid = document.getElementById('luoguUid').value.trim();
+        const apiKey = document.getElementById('apiKey').value.trim();
+        
+        // 决定分析哪场比赛（优先有比赛的平台）
+        let contest = nearestContests.luogu || nearestContests.atcoder;
+        if (!contest) {
+            alert('暂无即将开始的比赛');
+            return;
+        }
+        
+        const adviceArea = document.getElementById('adviceArea');
+        const adviceContent = document.getElementById('adviceContent');
+        
+        adviceArea.style.display = 'block';
+        adviceContent.textContent = '⏳ 正在分析比赛并生成建议...';
+        this.disabled = true;
+        this.textContent = '⏳ 生成中...';
+        
+        try {
+            const resp = await fetch('/api/contest-advice', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    contest: contest,
+                    luogu_uid: luoguUid,
+                    atcoder_user: document.getElementById('atcoderUser').value.trim(),
+                    api_key: apiKey
+                })
+            });
+            const data = await resp.json();
+            if (data.error) {
+                adviceContent.textContent = `⚠️ ${data.error}`;
+            } else {
+                // 渲染 Markdown
+                if (typeof marked !== 'undefined') {
+                    adviceContent.innerHTML = marked.parse(data.advice);
+                } else {
+                    adviceContent.innerHTML = data.advice.replace(/\n/g, '<br>');
+                }
+            }
+        } catch (e) {
+            adviceContent.textContent = `⚠️ 请求失败: ${e.message}`;
+        } finally {
+            this.disabled = false;
+            this.textContent = '🤖 参赛建议';
+        }
+    });
+
+    // 关闭建议
+    document.getElementById('closeAdviceBtn').addEventListener('click', function() {
+        document.getElementById('adviceArea').style.display = 'none';
+    });
+
+    // 通知权限
+    document.getElementById('contestNotifyBtn').addEventListener('click', function() {
+        if (!("Notification" in window)) {
+            alert('您的浏览器不支持通知功能');
+            return;
+        }
+        if (Notification.permission === 'granted') {
+            alert('✅ 通知已开启，比赛开始前 10 分钟会提醒你');
+        } else if (Notification.permission === 'default') {
+            Notification.requestPermission().then(perm => {
+                alert(perm === 'granted' ? '✅ 通知已开启' : '❌ 通知被拒绝');
+            });
+        } else {
+            alert('❌ 通知已被拒绝，请手动在浏览器设置中开启');
+        }
+    });
+
+    // 比赛开始前 10 分钟自动通知
+    function checkAndNotify() {
+        if (Notification.permission !== 'granted') return;
+        const now = Date.now() / 1000;
+        for (const [platform, contest] of Object.entries(nearestContests)) {
+            if (!contest) continue;
+            const diff = contest.startTime - now;
+            if (diff <= 600 && diff > 0) {
+                const key = `${platform}_${contest.id}`;
+                if (!window._notifiedSet) window._notifiedSet = new Set();
+                if (!window._notifiedSet.has(key)) {
+                    window._notifiedSet.add(key);
+                    new Notification('🏆 比赛即将开始！', {
+                        body: `[${contest.platform}] ${contest.name} 将在 10 分钟后开始`,
+                        icon: platform === 'luogu' ? 'https://cdn.luogu.com.cn/favicon.ico' : 'https://atcoder.jp/favicon.ico',
+                        tag: key,
+                        requireInteraction: true
+                    });
+                }
+            }
+        }
+    }
+
+    // 每分钟刷新
+    setInterval(() => {
+        fetchNearestContests();
+        checkAndNotify();
+    }, 60000);
+
+    // 每秒更新倒计时显示（不刷新数据）
+    setInterval(() => {
+        if (nearestContests.luogu) updateCountdown('luogu', nearestContests.luogu.startTime);
+        if (nearestContests.atcoder) updateCountdown('atcoder', nearestContests.atcoder.startTime);
+    }, 1000);
+
+    // 页面加载
+    setTimeout(fetchNearestContests, 1000);
     // ============================================================
     //  AtCoder 段位颜色
     // ============================================================

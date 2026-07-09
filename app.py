@@ -9,10 +9,126 @@ import threading
 from crawler import LuoguCrawler, AtCoderCrawler
 from analyzer import Analyzer
 from config import DEEPSEEK_API_KEY, LUOGU_COOKIE
+from datetime import datetime
+import time
 
 app = Flask(__name__, static_folder='static')
 CORS(app)
 
+@app.route('/api/upcoming-contests')
+def upcoming_contests():
+    """获取即将开始的比赛（洛谷 + AtCoder）"""
+    try:
+        luogu_crawler = LuoguCrawler()
+        atcoder_crawler = AtCoderCrawler()
+        
+        luogu_contests = luogu_crawler.get_upcoming_contests()
+        atcoder_contests = atcoder_crawler.get_upcoming_contests()
+        
+        all_contests = luogu_contests + atcoder_contests
+        all_contests.sort(key=lambda x: x["startTime"])
+        
+        # 只返回未来 7 天内的比赛
+        now = time.time()
+        seven_days = 7 * 24 * 3600
+        filtered = [c for c in all_contests if c["startTime"] - now <= seven_days]
+        
+        return jsonify(filtered)
+    except Exception as e:
+        print(f"获取比赛列表失败: {e}")
+        return jsonify([])
+
+@app.route('/api/nearest-contests')
+def nearest_contests():
+    try:
+        luogu_crawler = LuoguCrawler()
+        atcoder_crawler = AtCoderCrawler()
+        
+        luogu_list = luogu_crawler.get_upcoming_contests()
+        atcoder_list = atcoder_crawler.get_upcoming_contests()
+        
+        print(f"[DEBUG] 洛谷比赛数: {len(luogu_list)}")
+        print(f"[DEBUG] AtCoder 比赛数: {len(atcoder_list)}")
+        if atcoder_list:
+            print(f"[DEBUG] 最近一场 AtCoder: {atcoder_list[0].get('name')}")
+        
+        result = {}
+        if luogu_list:
+            result['luogu'] = luogu_list[0]
+        if atcoder_list:
+            result['atcoder'] = atcoder_list[0]
+        
+        return jsonify(result)
+    except Exception as e:
+        print(f"获取最近比赛失败: {e}")
+        return jsonify({})
+
+
+@app.route('/api/contest-advice', methods=['POST'])
+def contest_advice():
+    try:
+        data = request.get_json()
+        luogu_uid = data.get('luogu_uid', '').strip()
+        
+        if not luogu_uid:
+            return jsonify({'error': '请先运行分析'}), 400
+        
+        result_path = 'data/result.json'
+        if not os.path.exists(result_path):
+            return jsonify({'error': '请先点击"开始分析"生成数据'}), 400
+        
+        with open(result_path, 'r', encoding='utf-8') as f:
+            result_data = json.load(f)
+        
+        analysis = result_data.get('analysis', {})
+        overall_rating = analysis.get('overall_rating', '入门级')
+        weaknesses = analysis.get('weaknesses', [])
+        
+        # 获取所有待定比赛
+        luogu_crawler = LuoguCrawler()
+        atcoder_crawler = AtCoderCrawler()
+        luogu_list = luogu_crawler.get_upcoming_contests()
+        atcoder_list = atcoder_crawler.get_upcoming_contests()
+        
+        all_contests = luogu_list + atcoder_list
+        all_contests.sort(key=lambda x: x["startTime"])
+        
+        if not all_contests:
+            return jsonify({'error': '暂无即将开始的比赛'}), 400
+        
+        # 精简比赛列表
+        contest_lines = []
+        for c in all_contests[:15]:
+            problem_info = f" ({c.get('problemCount', '?')}题)" if c.get('problemCount') else ""
+            contest_lines.append(f"- [{c['platform']}] {c['name']}{problem_info}")
+        contest_info = "\n".join(contest_lines)
+        
+        prompt = f"""
+用户评级：{overall_rating}
+薄弱：{', '.join(weaknesses) if weaknesses else '无'}
+
+所有比赛：
+{contest_info}
+
+请推荐最适合用户的 2-3 场比赛（可包含洛谷和 AtCoder），每场格式：
+- [平台] 比赛名：理由，目标：AC X题
+
+只输出推荐内容，不要其他。
+"""
+        
+        user_api_key = data.get('api_key', '').strip()
+        api_key = user_api_key if user_api_key else DEEPSEEK_API_KEY
+        if not api_key:
+            return jsonify({'error': '请提供 DeepSeek API Key'}), 400
+        
+        from analyzer import Analyzer
+        analyzer = Analyzer(api_key=api_key)
+        reply = analyzer.chat_with_context("", prompt)
+        return jsonify({'advice': reply.strip()})
+        
+    except Exception as e:
+        print(f'生成参赛建议失败: {e}')
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/')
 def index():
@@ -73,17 +189,14 @@ def analyze():
             contest_id_str = str(contest_id)
             contest_name = get_contest_name(contest_id_str)
 
-            # 每个线程独立 crawler（使用已缓存的 Cookie）
             crawler = LuoguCrawler()
 
-            # 获取提交记录
             try:
                 submissions = crawler.get_contest_submissions(luogu_uid, contest_id_str)
             except Exception as e:
                 print(f"  跳过比赛 {contest_id_str}: {e}")
                 submissions = []
 
-            # 如果没有提交记录，直接返回空
             if not submissions:
                 return {
                     'contest_id': contest_id_str,
@@ -97,12 +210,10 @@ def analyze():
                     'total_problems': 0,
                 }
 
-            # 获取题目列表
             contest_problems_info = crawler.get_contest_problems(contest_id_str)
             total_problems = contest_problems_info.get('total', 0)
             problem_list = contest_problems_info.get('problems', [])
 
-            # 并行获取标签
             tags_map = {}
             difficulty_map = {}
             if problem_list:
@@ -113,7 +224,6 @@ def analyze():
                     tags = crawler.get_problem_tags(pid, contest_id_str)
                     return pid, {'tags': tags, 'difficulty': p.get('difficulty', '暂无评定')}
 
-                # 使用线程池并发获取标签（最多同时 5 个）
                 with ThreadPoolExecutor(max_workers=5) as tag_executor:
                     futures = {tag_executor.submit(fetch_tags_and_diff, p): p for p in problem_list}
                     for future in as_completed(futures):
@@ -123,7 +233,6 @@ def analyze():
                             tags_map[pid] = result_data['tags']
                             difficulty_map[pid] = result_data['difficulty']
 
-            # 计算每道题的最高分
             best_scores = {}
             for sub in submissions:
                 pid = sub['pid']
@@ -199,7 +308,6 @@ def analyze():
         atcoder_elo_history.sort(key=lambda x: x.get('time') or 0)
 
         # ---------- 6. DeepSeek 分析 ----------
-        # 检查是否提供 API Key（用户输入或配置文件）
         api_key = user_api_key if user_api_key else DEEPSEEK_API_KEY
         if api_key:
             try:
@@ -211,7 +319,6 @@ def analyze():
                     atcoder_rating
                 )
             except Exception as e:
-                # 如果 AI 分析失败，返回错误信息但不影响其他数据
                 analysis_result = {
                     "error": f"AI 分析失败: {str(e)}",
                     "overall_rating": "AI 分析出错",
@@ -222,7 +329,6 @@ def analyze():
                     "daily_mission": []
                 }
         else:
-            # 没有 API Key，返回空分析
             analysis_result = {
                 "error": "未提供 DeepSeek API Key，AI 分析已跳过",
                 "overall_rating": "未分析（请提供 API Key）",
@@ -232,6 +338,16 @@ def analyze():
                 "suggestions": "请配置 API Key 后重新分析",
                 "daily_mission": []
             }
+
+        # ---------- 校正题目名称（修复 AI 可能张冠李戴的问题） ----------
+        if 'daily_mission' in analysis_result and analysis_result['daily_mission']:
+            for task in analysis_result['daily_mission']:
+                pid = task.get('pid')
+                if pid:
+                    # 从 API 获取真实名称
+                    real_title = main_crawler.get_problem_title(pid)
+                    if real_title and real_title != pid:
+                        task['title'] = real_title
 
         # ---------- 7. 组装结果 ----------
         final_result = {
@@ -366,8 +482,8 @@ def _build_chat_context(data):
     if not context_parts:
         return "暂无你的个人数据，请先点击'开始分析'。"
 
-    return "你是一位资深的信息学奥赛教练。以下是选手已有的数据摘要：\n" + "\n".join(context_parts)
+    return "你是用户的数据分析助手。以下是用户已有的数据摘要：\n" + "\n".join(context_parts)
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5001, debug=False)
+    app.run(host='0.0.0.0', port=5002, debug=False)
