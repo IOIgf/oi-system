@@ -11,6 +11,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+import sys
 
 # ==================== Selenium Cookie 读取（全局缓存） ====================
 _SELENIUM_COOKIE_CACHE = {}
@@ -46,66 +47,45 @@ def get_cookie_from_chrome(domain: str) -> str:
     options.add_argument('--profile-directory=Default')
 
     try:
-        service = Service(ChromeDriverManager().install())
+        # 优先使用打包目录下的 chromedriver
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+            local_driver = os.path.join(base_dir, 'chromedriver.exe')
+            if os.path.exists(local_driver):
+                service = Service(local_driver)
+            else:
+                service = Service(ChromeDriverManager().install())
+        else:
+            service = Service(ChromeDriverManager().install())
+
         service.creation_flags = 0x08000000
         driver = webdriver.Chrome(service=service, options=options)
         driver.get(f'https://{domain}')
         time.sleep(1.5)
         cookies = driver.get_cookies()
         driver.quit()
+
         if cookies:
             cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
             _SELENIUM_COOKIE_CACHE[domain] = cookie_str
             return cookie_str
-    except WebDriverException:
-        # 备选 Edge
-        try:
-            from selenium.webdriver.edge.options import Options as EdgeOptions
-            from selenium.webdriver.edge.service import Service as EdgeService
-            from webdriver_manager.microsoft import EdgeChromiumDriverManager
-            edge_options = EdgeOptions()
-            edge_options.add_argument('--headless')
-            edge_options.add_argument('--disable-gpu')
-            edge_options.add_argument('--no-sandbox')
-            edge_options.add_argument('--remote-debugging-port=0')
-            edge_options.add_argument('--log-level=3')
-            edge_options.add_experimental_option('excludeSwitches', ['enable-logging'])
-            user_data_dir_edge = os.path.expanduser('~') + '/AppData/Local/Microsoft/Edge/User Data'
-            if os.path.exists(user_data_dir_edge):
-                edge_options.add_argument(f'--user-data-dir={user_data_dir_edge}')
-                edge_options.add_argument('--profile-directory=Default')
-            else:
-                edge_options.add_argument(f'--user-data-dir={tempfile.mkdtemp()}')
-            service = EdgeService(EdgeChromiumDriverManager().install())
-            driver = webdriver.Edge(service=service, options=edge_options)
-            driver.get(f'https://{domain}')
-            time.sleep(1.5)
-            cookies = driver.get_cookies()
-            driver.quit()
-            if cookies:
-                cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
-                _SELENIUM_COOKIE_CACHE[domain] = cookie_str
-                return cookie_str
-        except:
-            pass
-    except:
+    except Exception:
         pass
     return None
 
 
 # ==================== 洛谷爬虫 ====================
 class LuoguCrawler:
-    # 类级缓存（所有实例共享）
-    _problem_cache = {}          # 题目标签缓存: key -> tags
-    _tag_map_cache = None        # 标签 ID -> 名称
-    _algorithm_tag_ids = None    # 算法标签 ID 集合
-    _cookie_printed = False
-    _session_initialized = False
     _cached_cookie = None
+    _cookie_printed = False
+    _problem_cache = {}
+    _tag_map_cache = None
+    _algorithm_tag_ids = None
 
     def __init__(self, cookie: str = None):
         self.session = requests.Session()
         self.session.proxies = {}
+        self.session.trust_env = False
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -117,36 +97,55 @@ class LuoguCrawler:
             self._set_cookie_from_string(cookie)
             return
 
-        # 尝试从缓存获取
         if LuoguCrawler._cached_cookie:
             self._set_cookie_from_string(LuoguCrawler._cached_cookie)
             return
 
-        # 1. 尝试使用 browser_cookie3（最快，无需启动浏览器）
-        try:
-            import browser_cookie3
-            cj = browser_cookie3.chrome(domain_name='luogu.com.cn')
-            cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
+        # 检测是否处于打包环境
+        is_frozen = getattr(sys, 'frozen', False)
+
+        # 如果是打包环境，优先使用 Selenium
+        if is_frozen:
+            cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
             if cookie_str:
                 LuoguCrawler._cached_cookie = cookie_str
                 self._set_cookie_from_string(cookie_str)
                 if not LuoguCrawler._cookie_printed:
-                    print("✅ 已通过 browser_cookie3 读取洛谷 Cookie")
+                    print("✅ 已通过 Selenium 读取洛谷 Cookie")
                     LuoguCrawler._cookie_printed = True
                 return
-        except Exception as e:
-            print(f"⚠️ browser_cookie3 读取失败: {e}")
-
-        # 2. 备用方案：Selenium（启动浏览器，较慢）
-        cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
-        if cookie_str:
-            LuoguCrawler._cached_cookie = cookie_str
-            self._set_cookie_from_string(cookie_str)
-            if not LuoguCrawler._cookie_printed:
-                print("✅ 已通过 Selenium 读取洛谷 Cookie")
-                LuoguCrawler._cookie_printed = True
         else:
-            print("⚠️ 未获取到洛谷 Cookie，请确保 Chrome 已登录洛谷")
+            # 开发环境：优先使用 browser_cookie3（速度快）
+            try:
+                import browser_cookie3
+                cj = browser_cookie3.chrome(domain_name='www.luogu.com.cn')
+                cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
+                if cookie_str:
+                    LuoguCrawler._cached_cookie = cookie_str
+                    self._set_cookie_from_string(cookie_str)
+                    if not LuoguCrawler._cookie_printed:
+                        print("✅ 已通过 browser_cookie3 读取洛谷 Cookie")
+                        LuoguCrawler._cookie_printed = True
+                    return
+            except Exception as e:
+                print(f"⚠️ browser_cookie3 失败: {e}")
+
+        # 最后尝试 Selenium（如果不是打包环境但之前未尝试）
+        if not is_frozen:
+            try:
+                cookie_str = get_cookie_from_chrome('www.luogu.com.cn')
+                if cookie_str:
+                    LuoguCrawler._cached_cookie = cookie_str
+                    self._set_cookie_from_string(cookie_str)
+                    if not LuoguCrawler._cookie_printed:
+                        print("✅ 已通过 Selenium 读取洛谷 Cookie")
+                        LuoguCrawler._cookie_printed = True
+                    return
+            except Exception as e:
+                print(f"⚠️ Selenium 读取失败: {e}")
+
+        print("⚠️ 未获取到洛谷 Cookie，请确保 Chrome 已登录洛谷")
+        print("   或手动在 config.py 中配置 LUOGU_COOKIE")
 
     def _set_cookie_from_string(self, cookie_str: str):
         cookie_dict = {}
@@ -504,12 +503,13 @@ class LuoguCrawler:
 
 # ==================== AtCoder 爬虫 ====================
 class AtCoderCrawler:
-    _cookie_printed = False
     _cached_cookie = None
+    _cookie_printed = False
 
     def __init__(self, cookie: str = None):
         self.session = requests.Session()
         self.session.proxies = {}
+        self.session.trust_env = False
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "application/json, text/plain, */*",
@@ -525,30 +525,47 @@ class AtCoderCrawler:
             self._set_cookie_from_string(AtCoderCrawler._cached_cookie)
             return
 
-        try:
-            import browser_cookie3
-            cj = browser_cookie3.chrome(domain_name='atcoder.jp')
-            cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
+        is_frozen = getattr(sys, 'frozen', False)
+
+        if is_frozen:
+            cookie_str = get_cookie_from_chrome('atcoder.jp')
             if cookie_str:
                 AtCoderCrawler._cached_cookie = cookie_str
                 self._set_cookie_from_string(cookie_str)
                 if not AtCoderCrawler._cookie_printed:
-                    print("✅ 已通过 browser_cookie3 读取 AtCoder Cookie")
+                    print("✅ 已通过 Selenium 读取 AtCoder Cookie")
                     AtCoderCrawler._cookie_printed = True
                 return
-        except Exception:
-            pass
-
-        # 备用：使用 Selenium
-        cookie_str = get_cookie_from_chrome('atcoder.jp')
-        if cookie_str:
-            AtCoderCrawler._cached_cookie = cookie_str
-            self._set_cookie_from_string(cookie_str)
-            if not AtCoderCrawler._cookie_printed:
-                print("✅ 已通过 Selenium 读取 AtCoder Cookie")
-                AtCoderCrawler._cookie_printed = True
         else:
-            print("⚠️ 未获取到 AtCoder Cookie，请确保 Chrome 已登录 AtCoder")
+            try:
+                import browser_cookie3
+                cj = browser_cookie3.chrome(domain_name='atcoder.jp')
+                cookie_str = "; ".join([f"{c.name}={c.value}" for c in cj])
+                if cookie_str:
+                    AtCoderCrawler._cached_cookie = cookie_str
+                    self._set_cookie_from_string(cookie_str)
+                    if not AtCoderCrawler._cookie_printed:
+                        print("✅ 已通过 browser_cookie3 读取 AtCoder Cookie")
+                        AtCoderCrawler._cookie_printed = True
+                    return
+            except Exception as e:
+                print(f"⚠️ browser_cookie3 失败: {e}")
+
+        if not is_frozen:
+            try:
+                cookie_str = get_cookie_from_chrome('atcoder.jp')
+                if cookie_str:
+                    AtCoderCrawler._cached_cookie = cookie_str
+                    self._set_cookie_from_string(cookie_str)
+                    if not AtCoderCrawler._cookie_printed:
+                        print("✅ 已通过 Selenium 读取 AtCoder Cookie")
+                        AtCoderCrawler._cookie_printed = True
+                    return
+            except Exception as e:
+                print(f"⚠️ Selenium 读取失败: {e}")
+
+        print("⚠️ 未获取到 AtCoder Cookie，请确保 Chrome 已登录 AtCoder")
+        print("   或手动在 config.py 中配置 LUOGU_COOKIE")
 
     def _set_cookie_from_string(self, cookie_str: str):
         cookie_dict = {}
@@ -626,23 +643,17 @@ class AtCoderCrawler:
             return {"rating": "N/A", "rank": "N/A"}
 
     def get_contest_tasks(self, contest_id: str) -> List[Dict[str, str]]:
-        """
-        从 AtCoder /tasks 页面获取该场比赛的所有题目列表
-        返回: [{"pid": "abc465_a", "title": "..."}, ...]
-        """
         url = f"https://atcoder.jp/contests/{contest_id}/tasks"
         try:
             resp = self.session.get(url, timeout=10)
             if resp.status_code != 200:
                 return []
             soup = BeautifulSoup(resp.text, "html.parser")
-            # AtCoder 题目列表在 id="main-container" 的 table 中
             table = soup.select_one("#main-container table")
             if not table:
                 return []
             tasks = []
-            rows = table.find_all("tr")[1:]  # 跳过表头
-            for row in rows:
+            for row in table.find_all("tr")[1:]:
                 cols = row.find_all("td")
                 if len(cols) >= 2:
                     link = cols[0].find("a")
@@ -707,14 +718,10 @@ class AtCoderCrawler:
 
             problems = {}
             total_problems = 0
-            task_list = []
             if contest_id:
-                # 获取该场比赛的题目列表（用于统计总数）
                 tasks = self.get_contest_tasks(contest_id)
-                task_list = tasks
                 total_problems = len(tasks)
 
-                # 获取榜单数据（包含提交状态）
                 standings = self._get_contest_standings(contest_id)
                 if standings and "StandingsData" in standings:
                     target_username_lower = username.lower()
@@ -733,7 +740,6 @@ class AtCoderCrawler:
                                 elif status_code == 0:
                                     status = "未提交"
                                 else:
-                                    # 对于未知状态码，用分数辅助判断
                                     if score > 0:
                                         status = "AC"
                                     else:
@@ -754,7 +760,6 @@ class AtCoderCrawler:
                 "rating": rating,
                 "problems": problems,
                 "total_problems": total_problems,
-                "task_list": task_list,
                 "end_time": item.get("EndTime"),
             }
 
