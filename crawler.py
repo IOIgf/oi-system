@@ -17,17 +17,25 @@ import tempfile
 
 # ==================== Selenium Cookie 读取（全局缓存） ====================
 _SELENIUM_COOKIE_CACHE = {}
-
 def get_cookie_from_chrome(domain: str) -> str:
-    """使用 Selenium 从 Chrome 获取完整的 Cookie（包含所有字段）"""
     if domain in _SELENIUM_COOKIE_CACHE:
         return _SELENIUM_COOKIE_CACHE[domain]
 
-    # 抑制 webdriver-manager 日志
+    # 如果两个域都缓存，直接返回
+    if len(_SELENIUM_COOKIE_CACHE) >= 2:
+        return _SELENIUM_COOKIE_CACHE.get(domain)
+
+    # 一次性获取两个域的 Cookie
+    domains = ['www.luogu.com.cn', 'atcoder.jp']
+    print("🚀 正在启动 Selenium 读取 Cookie...")
+    import os
+    import tempfile
+    from selenium.common.exceptions import WebDriverException
+    from webdriver_manager.chrome import ChromeDriverManager
+
     os.environ['WDM_LOG_LEVEL'] = '0'
     os.environ['WDM_PRINT_FIRST_LINE'] = 'False'
 
-    # 使用默认用户数据目录，保留登录状态
     user_data_dir = os.path.expanduser('~') + '/AppData/Local/Google/Chrome/User Data'
     if not os.path.exists(user_data_dir):
         user_data_dir = tempfile.mkdtemp()
@@ -59,20 +67,21 @@ def get_cookie_from_chrome(domain: str) -> str:
 
         service.creation_flags = 0x08000000
         driver = webdriver.Chrome(service=service, options=options)
-        driver.get(f'https://{domain}')
-        time.sleep(1.5)
-        cookies = driver.get_cookies()
-        driver.quit()
 
-        if cookies:
-            cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
-            _SELENIUM_COOKIE_CACHE[domain] = cookie_str
-            return cookie_str
-        else:
-            print(f"⚠️ Selenium 未获取到 {domain} 的 Cookie，请确认 Chrome 已登录 {domain}")
-            return None
+        # 遍历两个域名，分别获取 Cookie
+        for d in domains:
+            driver.get(f'https://{d}')
+            time.sleep(1.5)
+            cookies = driver.get_cookies()
+            if cookies:
+                cookie_str = "; ".join([f"{c['name']}={c['value']}" for c in cookies])
+                _SELENIUM_COOKIE_CACHE[d] = cookie_str
+        driver.quit()
+        print("✅ Selenium 读取 Cookie 完成")
+        return _SELENIUM_COOKIE_CACHE.get(domain)
+
     except Exception as e:
-        print(f"⚠️ Selenium 读取 {domain} Cookie 失败: {e}")
+        print(f"⚠️ Selenium 读取 Cookie 失败: {e}")
         return None
 
 

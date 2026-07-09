@@ -73,54 +73,69 @@ def analyze():
             contest_id_str = str(contest_id)
             contest_name = get_contest_name(contest_id_str)
 
+            # 每个线程独立 crawler（使用已缓存的 Cookie）
             crawler = LuoguCrawler()
 
+            # 获取提交记录
             try:
                 submissions = crawler.get_contest_submissions(luogu_uid, contest_id_str)
             except Exception as e:
                 print(f"  跳过比赛 {contest_id_str}: {e}")
                 submissions = []
 
+            # 如果没有提交记录，直接返回空
+            if not submissions:
+                return {
+                    'contest_id': contest_id_str,
+                    'contest_name': contest_name,
+                    'elo_before': prev_rating,
+                    'elo_after': rating,
+                    'elo_change': change,
+                    'time': record.get('time'),
+                    'problems': [],
+                    'accepted_count': 0,
+                    'total_problems': 0,
+                }
+
+            # 获取题目列表
             contest_problems_info = crawler.get_contest_problems(contest_id_str)
             total_problems = contest_problems_info.get('total', 0)
             problem_list = contest_problems_info.get('problems', [])
 
-            if not submissions:
-                problems = []
-                accepted_count = 0
-            else:
-                tags_map = {}
-                difficulty_map = {}
+            # 并行获取标签
+            tags_map = {}
+            difficulty_map = {}
+            if problem_list:
+                def fetch_tags_and_diff(p):
+                    pid = p.get('pid')
+                    if not pid:
+                        return None, None
+                    tags = crawler.get_problem_tags(pid, contest_id_str)
+                    return pid, {'tags': tags, 'difficulty': p.get('difficulty', '暂无评定')}
 
-                if problem_list:
-                    def fetch_tags_and_diff(p):
-                        pid = p.get('pid')
-                        if not pid:
-                            return None, None
-                        tags = crawler.get_problem_tags(pid, contest_id_str)
-                        return pid, {'tags': tags, 'difficulty': p.get('difficulty', '暂无评定')}
+                # 使用线程池并发获取标签（最多同时 5 个）
+                with ThreadPoolExecutor(max_workers=5) as tag_executor:
+                    futures = {tag_executor.submit(fetch_tags_and_diff, p): p for p in problem_list}
+                    for future in as_completed(futures):
+                        result = future.result()
+                        if result:
+                            pid, result_data = result
+                            tags_map[pid] = result_data['tags']
+                            difficulty_map[pid] = result_data['difficulty']
 
-                    with ThreadPoolExecutor(max_workers=3) as tag_executor:
-                        futures = {tag_executor.submit(fetch_tags_and_diff, p): p for p in problem_list}
-                        for future in as_completed(futures):
-                            result = future.result()
-                            if result:
-                                pid, result_data = result
-                                tags_map[pid] = result_data['tags']
-                                difficulty_map[pid] = result_data['difficulty']
+            # 计算每道题的最高分
+            best_scores = {}
+            for sub in submissions:
+                pid = sub['pid']
+                score = sub.get('score') or 0
+                if pid not in best_scores or score > best_scores[pid]['score']:
+                    best_scores[pid] = sub
+                    best_scores[pid]['score'] = score
+                    best_scores[pid]['tags'] = tags_map.get(pid, [])
+                    best_scores[pid]['difficulty'] = difficulty_map.get(pid, '暂无评定')
 
-                best_scores = {}
-                for sub in submissions:
-                    pid = sub['pid']
-                    score = sub.get('score') or 0
-                    if pid not in best_scores or score > best_scores[pid]['score']:
-                        best_scores[pid] = sub
-                        best_scores[pid]['score'] = score
-                        best_scores[pid]['tags'] = tags_map.get(pid, [])
-                        best_scores[pid]['difficulty'] = difficulty_map.get(pid, '暂无评定')
-
-                problems = list(best_scores.values())
-                accepted_count = sum(1 for p in problems if p['status'] == 'AC')
+            problems = list(best_scores.values())
+            accepted_count = sum(1 for p in problems if p['status'] == 'AC')
 
             return {
                 'contest_id': contest_id_str,
@@ -351,8 +366,8 @@ def _build_chat_context(data):
     if not context_parts:
         return "暂无你的个人数据，请先点击'开始分析'。"
 
-    return "你是用户的数据分析助手。以下是用户已有的数据摘要：\n" + "\n".join(context_parts)
+    return "你是一位资深的信息学奥赛教练。以下是选手已有的数据摘要：\n" + "\n".join(context_parts)
 
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(host='0.0.0.0', port=5001, debug=False)
